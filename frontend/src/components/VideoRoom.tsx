@@ -13,6 +13,8 @@ import {
   VideoOff,
   Wifi,
   Radio,
+  Loader2,
+  Volume2,
 } from 'lucide-react';
 
 interface VideoRoomProps {
@@ -42,8 +44,10 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [callDuration, setCallDuration] = useState(0);
 
   const [hasRemotePeer, setHasRemotePeer] = useState(false);
+  const [hasRemoteStream, setHasRemoteStream] = useState(false);
   const [remotePeerEmail, setRemotePeerEmail] = useState<string | null>(null);
   const [peerCount, setPeerCount] = useState(1);
+  const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
 
   const [networkStats, setNetworkStats] = useState<NetworkQualityStats>({
     rtt: 32,
@@ -78,12 +82,14 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
         (remoteStream) => {
           console.log('[VIDEOROOM] Remote stream received from peer:', remoteStream);
           if (active) {
+            setHasRemoteStream(true);
             setHasRemotePeer(true);
             setPeerCount(2);
             if (remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = remoteStream;
               remoteVideoRef.current.play().catch((err) => {
                 console.warn('[VIDEOROOM] Remote video autoplay error:', err);
+                setIsAutoplayBlocked(true);
               });
             }
           }
@@ -94,14 +100,15 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           }
         },
         (status) => {
+          console.log('[VIDEOROOM] Peer status updated:', status);
           if (active) {
-            console.log('[VIDEOROOM] Peer status updated:', status);
             setHasRemotePeer(status.connected);
             if (status.connected) {
               setPeerCount(status.peersCount || 2);
               if (status.email) setRemotePeerEmail(status.email);
             } else {
               setPeerCount(1);
+              setHasRemoteStream(false);
               setRemotePeerEmail(null);
               if (remoteVideoRef.current) {
                 remoteVideoRef.current.srcObject = null;
@@ -187,6 +194,14 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     manager.sendChatMessage(text);
   };
 
+  const handleUnblockAutoplay = () => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.play().then(() => {
+        setIsAutoplayBlocked(false);
+      }).catch((e) => console.warn('Retry play failed:', e));
+    }
+  };
+
   const copyRoomCode = () => {
     navigator.clipboard.writeText(roomId);
     setCopied(true);
@@ -247,21 +262,54 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       {/* Main Video Arena */}
       <div className="flex-1 w-full h-full p-4 pb-24 pt-20 flex items-center justify-center">
         <div className="relative w-full h-full max-w-7xl max-h-[90vh] rounded-3xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-2xl flex items-center justify-center">
-          {/* Main Remote Video (Always mounted to capture ontrack immediately) */}
+          {/* Main Remote Video: Always in DOM so video decoders never sleep, but opacity-0 until stream is live */}
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className={`w-full h-full object-cover transition-opacity duration-300 ${
-              !hasRemotePeer
-                ? 'hidden'
-                : networkStats.tier === 'critical-audio-only'
-                ? 'opacity-20 blur-md'
-                : 'opacity-100'
+            className={`w-full h-full object-cover transition-opacity duration-500 ${
+              hasRemoteStream
+                ? networkStats.tier === 'critical-audio-only'
+                  ? 'opacity-20 blur-md'
+                  : 'opacity-100'
+                : 'opacity-0 pointer-events-none absolute'
             }`}
           />
 
-          {/* Waiting for Peer State */}
+          {/* Autoplay blocked banner */}
+          {isAutoplayBlocked && (
+            <div className="absolute top-6 z-30 flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-500/90 text-slate-950 shadow-2xl backdrop-blur-md animate-bounce">
+              <Volume2 className="h-5 w-5" />
+              <span className="text-xs font-bold">Audio & Video paused by browser policy.</span>
+              <button
+                onClick={handleUnblockAutoplay}
+                className="px-3 py-1 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition"
+              >
+                Click to Resume
+              </button>
+            </div>
+          )}
+
+          {/* State 1: Peer has joined signaling, but stream is negotiating */}
+          {hasRemotePeer && !hasRemoteStream && (
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-md z-10 animate-fade-in">
+              <div className="relative mb-6">
+                <div className="h-20 w-20 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center">
+                  <Loader2 className="h-10 w-10 text-cyan-400 animate-spin" />
+                </div>
+              </div>
+              <h2 className="text-xl font-bold text-white mb-2">Connecting to Peer...</h2>
+              <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
+                Peer ({remotePeerEmail ? remotePeerEmail.split('@')[0] : 'Remote'}) joined. Establishing secure WebRTC P2P stream via STUN/TURN relays...
+              </p>
+              <div className="flex items-center gap-2 rounded-full bg-slate-950/80 border border-slate-800 px-3 py-1 text-[11px] font-mono text-cyan-400">
+                <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
+                <span>Exchanging ICE Candidates</span>
+              </div>
+            </div>
+          )}
+
+          {/* State 2: Waiting for Peer to join room */}
           {!hasRemotePeer && (
             <div className="flex flex-col items-center justify-center p-8 text-center max-w-lg z-10">
               <div className="relative mb-6">
@@ -276,7 +324,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
 
               <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Waiting for peer to connect...</h2>
               <p className="text-sm text-slate-400 mb-6 max-w-md leading-relaxed">
-                Enter room code <span className="font-mono text-cyan-300 font-semibold">{roomId}</span> on your second device or send this link to start live video & audio call.
+                Enter room code <span className="font-mono text-cyan-300 font-semibold">{roomId}</span> on your second device or send this code to start live video & audio call.
               </p>
 
               <div className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-inner">
@@ -298,7 +346,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           )}
 
           {/* Extreme Network Critical Audio-Only Banner */}
-          {hasRemotePeer && networkStats.tier === 'critical-audio-only' && (
+          {hasRemoteStream && networkStats.tier === 'critical-audio-only' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-10 text-center p-6">
               <div className="h-16 w-16 rounded-full bg-rose-500/20 border border-rose-500/50 flex items-center justify-center animate-pulse">
                 <Wifi className="h-8 w-8 text-rose-400" />
@@ -314,7 +362,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           )}
 
           {/* Remote Peer Label */}
-          {hasRemotePeer && (
+          {hasRemoteStream && (
             <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 rounded-xl bg-black/60 px-3 py-1.5 backdrop-blur-md border border-slate-800 text-xs text-slate-200">
               <span>{remotePeerEmail ? `Peer (${remotePeerEmail.split('@')[0]})` : 'Remote Peer'}</span>
               <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-mono text-cyan-400">

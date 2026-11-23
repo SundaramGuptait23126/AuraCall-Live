@@ -56,9 +56,22 @@ export class WebRTCManager {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun.services.mozilla.com' },
-        { urls: 'stun:global.stun.twilio.com:3478' },
+        { urls: 'stun:openrelay.metered.ca:80' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject',
+        },
       ],
       iceCandidatePoolSize: 10,
     };
@@ -300,12 +313,15 @@ export class WebRTCManager {
         offerToReceiveVideo: true,
       });
 
-      if (offer.sdp) {
-        offer.sdp = enableOpusFEC(offer.sdp);
-      }
-
       await this.peerConnection.setLocalDescription(offer);
-      this.sendSignal('signal-offer', { sdp: offer });
+
+      const modifiedSdp = offer.sdp ? enableOpusFEC(offer.sdp) : offer.sdp;
+      this.sendSignal('signal-offer', {
+        sdp: {
+          type: offer.type,
+          sdp: modifiedSdp,
+        },
+      });
     } catch (err) {
       console.error('[WEBRTC] Failed to create offer:', err);
     }
@@ -318,10 +334,10 @@ export class WebRTCManager {
         console.warn('[WEBRTC] handleOffer called while signalingState is:', this.peerConnection.signalingState);
         await Promise.all([
           this.peerConnection.setLocalDescription({ type: 'rollback' }),
-          this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer)),
+          this.peerConnection.setRemoteDescription(offer),
         ]);
       } else {
-        await this.peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        await this.peerConnection.setRemoteDescription(offer);
       }
 
       // Flush queued ICE candidates
@@ -329,7 +345,7 @@ export class WebRTCManager {
         const cand = this.iceCandidatesQueue.shift();
         if (cand) {
           try {
-            await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+            await this.peerConnection.addIceCandidate(cand);
           } catch (e) {
             console.warn('[WEBRTC] Queued candidate add error:', e);
           }
@@ -337,12 +353,15 @@ export class WebRTCManager {
       }
 
       const answer = await this.peerConnection.createAnswer();
-      if (answer.sdp) {
-        answer.sdp = enableOpusFEC(answer.sdp);
-      }
-
       await this.peerConnection.setLocalDescription(answer);
-      this.sendSignal('signal-answer', { sdp: answer });
+
+      const modifiedSdp = answer.sdp ? enableOpusFEC(answer.sdp) : answer.sdp;
+      this.sendSignal('signal-answer', {
+        sdp: {
+          type: answer.type,
+          sdp: modifiedSdp,
+        },
+      });
     } catch (err) {
       console.error('[WEBRTC] Failed to handle offer and create answer:', err);
     }
@@ -356,14 +375,14 @@ export class WebRTCManager {
         return;
       }
 
-      await this.peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      await this.peerConnection.setRemoteDescription(answer);
 
       // Flush queued candidates
       while (this.iceCandidatesQueue.length > 0) {
         const cand = this.iceCandidatesQueue.shift();
         if (cand) {
           try {
-            await this.peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+            await this.peerConnection.addIceCandidate(cand);
           } catch (e) {
             console.warn('[WEBRTC] Queued candidate add error:', e);
           }
@@ -378,7 +397,7 @@ export class WebRTCManager {
     if (!this.peerConnection) return;
     try {
       if (this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
-        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+        await this.peerConnection.addIceCandidate(candidate);
       } else {
         this.iceCandidatesQueue.push(candidate);
       }
