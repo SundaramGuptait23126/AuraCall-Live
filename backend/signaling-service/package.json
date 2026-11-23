@@ -1,0 +1,13 @@
+{
+  "name": "signaling-service",
+  "version": "1.0.0",
+  "description": "WebSocket Signaling Microservice for WebRTC with JWT verification",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.2",
+    "ws": "^8.18.0"
+  }
+}

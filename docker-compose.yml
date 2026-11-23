@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # Nginx API Gateway & Reverse Proxy
+  nginx-gateway:
+    image: nginx:alpine
+    container_name: auracall-gateway
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - auth-service
+      - signaling-service
+    networks:
+      - auracall-network
+
+  # Frontend Web App (React + Vite)
+  frontend:
+    build:
+      context: ./frontend
+    container_name: auracall-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_PORT=3000
+    networks:
+      - auracall-network
+
+  # Auth Microservice (Email, OTP, JWT)
+  auth-service:
+    build:
+      context: ./backend/auth-service
+    container_name: auracall-auth
+    ports:
+      - "4001:4001"
+    environment:
+      - PORT=4001
+      - JWT_SECRET=auracall-super-secure-jwt-key-9923847
+      - SLM_SERVICE_URL=http://slm-mailer:5000
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - slm-mailer
+    networks:
+      - auracall-network
+
+  # Signaling Microservice (WebSockets)
+  signaling-service:
+    build:
+      context: ./backend/signaling-service
+    container_name: auracall-signaling
+    ports:
+      - "4003:4003"
+    environment:
+      - PORT=4003
+      - JWT_SECRET=auracall-super-secure-jwt-key-9923847
+    networks:
+      - auracall-network
+
+  # SLM Mailer Service
+  slm-mailer:
+    build:
+      context: ./backend/slm-mailer-mock
+    container_name: auracall-slm-mailer
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+    networks:
+      - auracall-network
+
+  # Redis for OTP caching and WebSocket Pub/Sub
+  redis:
+    image: redis:7-alpine
+    container_name: auracall-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - auracall-network
+
+networks:
+  auracall-network:
+    driver: bridge

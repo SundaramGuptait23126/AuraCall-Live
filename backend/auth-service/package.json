@@ -1,0 +1,15 @@
+{
+  "name": "auth-service",
+  "version": "1.0.0",
+  "description": "Auth Microservice with SLM Mailer and JWT",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "ioredis": "^5.4.1"
+  }
+}
