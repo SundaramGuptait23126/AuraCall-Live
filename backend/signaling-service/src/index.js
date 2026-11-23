@@ -134,5 +134,5 @@ function broadcastToRoom(roomId, senderWs, packet) {
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[SIGNALING-SERVICE] HTTP & WebSocket server listening on port ${PORT}`);
+  console.log(`[SIGNALING-SERVICE] v1.0.1 Live: HTTP & WebSocket server listening on port ${PORT}`);
 });
