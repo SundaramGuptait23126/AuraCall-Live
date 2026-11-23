@@ -134,45 +134,8 @@ export class WebRTCManager {
       this.peerConnection.onconnectionstatechange = () => {
         console.log('[WEBRTC] Connection state:', this.peerConnection?.connectionState);
       };
-
-      this.prioritizeUniversalCodecs();
     } catch (err) {
       console.warn('[WEBRTC] PeerConnection init failed:', err);
-    }
-  }
-
-  // Universal codec prioritization: VP8 and H264 before VP9 for smooth mobile encoding
-  private prioritizeUniversalCodecs() {
-    if (!this.peerConnection) return;
-    if (typeof RTCRtpSender !== 'undefined' && 'getCapabilities' in RTCRtpSender) {
-      try {
-        const capabilities = RTCRtpSender.getCapabilities('video');
-        if (capabilities && capabilities.codecs) {
-          const sortedCodecs = [...capabilities.codecs].sort((a, b) => {
-            const aMime = a.mimeType.toLowerCase();
-            const bMime = b.mimeType.toLowerCase();
-            const getScore = (mime: string) => {
-              if (mime.includes('vp8')) return 1;
-              if (mime.includes('h264')) return 2;
-              if (mime.includes('vp9')) return 3;
-              if (mime.includes('av1')) return 4;
-              return 5;
-            };
-            return getScore(aMime) - getScore(bMime);
-          });
-
-          const transceivers = this.peerConnection.getTransceivers();
-          for (const transceiver of transceivers) {
-            if (transceiver.receiver.track.kind === 'video' || transceiver.sender.track?.kind === 'video') {
-              if (transceiver.setCodecPreferences) {
-                transceiver.setCodecPreferences(sortedCodecs);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('[WEBRTC] Prioritize codecs error:', e);
-      }
     }
   }
 
@@ -203,7 +166,6 @@ export class WebRTCManager {
         stream.getTracks().forEach((track) => {
           this.peerConnection?.addTrack(track, stream);
         });
-        this.prioritizeUniversalCodecs();
       }
 
       return stream;
@@ -370,7 +332,6 @@ export class WebRTCManager {
   private async createAndSendOffer() {
     if (!this.peerConnection) return;
     try {
-      this.prioritizeUniversalCodecs();
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
 
@@ -410,7 +371,6 @@ export class WebRTCManager {
         }
       }
 
-      this.prioritizeUniversalCodecs();
       const answer = await this.peerConnection.createAnswer();
       await this.peerConnection.setLocalDescription(answer);
 
@@ -703,16 +663,16 @@ export class WebRTCManager {
     // Determine tier based on REAL network metrics
     let derivedTier: NetworkTier = 'excellent';
     if (iceState !== 'connected' && iceState !== 'completed') {
-      derivedTier = 'critical-audio-only';
+      derivedTier = 'good';
       resolution = iceState === 'failed' ? 'ICE Failed (NAT Block)' : `ICE: ${iceState.toUpperCase()}`;
     } else if (framesDecoded === 0 && realBitrateKbps === 0) {
-      derivedTier = 'poor';
+      derivedTier = 'good';
       resolution = 'Connected • Awaiting Frames';
-    } else if (realPacketLoss > 15 || realRtt > 300) {
+    } else if (realPacketLoss > 20 || realRtt > 400) {
       derivedTier = 'critical-audio-only';
-    } else if (realPacketLoss > 5 || realRtt > 150) {
+    } else if (realPacketLoss > 8 || realRtt > 200) {
       derivedTier = 'poor';
-    } else if (realPacketLoss > 1.5 || realRtt > 60) {
+    } else if (realPacketLoss > 2 || realRtt > 80) {
       derivedTier = 'good';
     }
 
@@ -731,9 +691,10 @@ export class WebRTCManager {
   }
 
   private applyAdaptiveLayer(tier: NetworkTier) {
+    // Only adaptively disable video if the user is explicitly testing via manual simulation
     if (!this.localStream) return;
     const videoTrack = this.localStream.getVideoTracks()[0];
-    if (videoTrack) {
+    if (videoTrack && this.isManualSimulation) {
       if (tier === 'critical-audio-only') {
         videoTrack.enabled = false;
       } else {

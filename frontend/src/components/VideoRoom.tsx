@@ -515,7 +515,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           )}
 
           {/* Extreme Network Critical Audio-Only Banner */}
-          {hasRemoteStream && networkStats.tier === 'critical-audio-only' && (
+          {hasRemoteStream && networkStats.tier === 'critical-audio-only' && (iceState === 'connected' || iceState === 'completed') && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-10 text-center p-6">
               <div className="h-16 w-16 rounded-full bg-rose-500/20 border border-rose-500/50 flex items-center justify-center animate-pulse">
                 <Wifi className="h-8 w-8 text-rose-400" />
