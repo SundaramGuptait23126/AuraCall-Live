@@ -34,6 +34,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [manager] = useState(() => new WebRTCManager());
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
   const [isAudioMuted, setIsAudioMuted] = useState(!initialAudio);
   const [isVideoOff, setIsVideoOff] = useState(!initialVideo);
@@ -70,6 +71,27 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     },
   ]);
 
+  // Global user gesture listener to automatically unlock audio in strict browsers
+  useEffect(() => {
+    const unlockAudio = () => {
+      if (remoteAudioRef.current && remoteAudioRef.current.srcObject) {
+        remoteAudioRef.current
+          .play()
+          .then(() => {
+            setIsAutoplayBlocked(false);
+          })
+          .catch(() => {});
+      }
+    };
+
+    window.addEventListener('click', unlockAudio);
+    window.addEventListener('touchstart', unlockAudio);
+    return () => {
+      window.removeEventListener('click', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
+    };
+  }, []);
+
   // Initialize Media & Call
   useEffect(() => {
     let active = true;
@@ -85,13 +107,37 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             setHasRemoteStream(true);
             setHasRemotePeer(true);
             setPeerCount(2);
+
+            // 1. Muted video element: 100% immune to browser autoplay blocking
             if (remoteVideoRef.current) {
-              remoteVideoRef.current.srcObject = remoteStream;
+              if (remoteVideoRef.current.srcObject !== remoteStream) {
+                remoteVideoRef.current.srcObject = remoteStream;
+              }
               remoteVideoRef.current.play().catch((err) => {
-                console.warn('[VIDEOROOM] Remote video autoplay error:', err);
-                setIsAutoplayBlocked(true);
+                console.warn('[VIDEOROOM] Remote video play error:', err);
               });
             }
+
+            // 2. Dedicated audio element for pristine Opus audio
+            if (remoteAudioRef.current) {
+              if (remoteAudioRef.current.srcObject !== remoteStream) {
+                remoteAudioRef.current.srcObject = remoteStream;
+              }
+              remoteAudioRef.current
+                .play()
+                .then(() => {
+                  setIsAutoplayBlocked(false);
+                })
+                .catch((err) => {
+                  console.warn('[VIDEOROOM] Remote audio autoplay blocked by browser policy:', err);
+                  setIsAutoplayBlocked(true);
+                });
+            }
+
+            remoteStream.onaddtrack = () => {
+              if (remoteVideoRef.current) remoteVideoRef.current.play().catch(() => {});
+              if (remoteAudioRef.current) remoteAudioRef.current.play().catch(() => {});
+            };
           }
         },
         (chatMsg) => {
@@ -112,6 +158,9 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               setRemotePeerEmail(null);
               if (remoteVideoRef.current) {
                 remoteVideoRef.current.srcObject = null;
+              }
+              if (remoteAudioRef.current) {
+                remoteAudioRef.current.srcObject = null;
               }
             }
           }
@@ -195,10 +244,13 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   };
 
   const handleUnblockAutoplay = () => {
-    if (remoteVideoRef.current) {
-      remoteVideoRef.current.play().then(() => {
-        setIsAutoplayBlocked(false);
-      }).catch((e) => console.warn('Retry play failed:', e));
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current
+        .play()
+        .then(() => {
+          setIsAutoplayBlocked(false);
+        })
+        .catch((e) => console.warn('Retry play failed:', e));
     }
   };
 
@@ -262,11 +314,12 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       {/* Main Video Arena */}
       <div className="flex-1 w-full h-full p-4 pb-24 pt-20 flex items-center justify-center">
         <div className="relative w-full h-full max-w-7xl max-h-[90vh] rounded-3xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-2xl flex items-center justify-center">
-          {/* Main Remote Video: Always in DOM so video decoders never sleep, but opacity-0 until stream is live */}
+          {/* Main Remote Video: ALWAYS MUTED so browser never pauses or blocks video decoding */}
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
+            muted
             className={`w-full h-full object-cover transition-opacity duration-500 ${
               hasRemoteStream
                 ? networkStats.tier === 'critical-audio-only'
@@ -276,16 +329,19 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             }`}
           />
 
-          {/* Autoplay blocked banner */}
+          {/* Dedicated Audio Element for Peer Voice */}
+          <audio ref={remoteAudioRef} autoPlay playsInline />
+
+          {/* Autoplay Audio Unblock Banner */}
           {isAutoplayBlocked && (
             <div className="absolute top-6 z-30 flex items-center gap-3 px-4 py-2 rounded-2xl bg-amber-500/90 text-slate-950 shadow-2xl backdrop-blur-md animate-bounce">
               <Volume2 className="h-5 w-5" />
-              <span className="text-xs font-bold">Audio & Video paused by browser policy.</span>
+              <span className="text-xs font-bold">Tap anywhere to unmute peer audio.</span>
               <button
                 onClick={handleUnblockAutoplay}
                 className="px-3 py-1 bg-slate-950 text-white rounded-xl text-xs font-semibold hover:bg-slate-800 transition"
               >
-                Click to Resume
+                Unmute Sound
               </button>
             </div>
           )}
