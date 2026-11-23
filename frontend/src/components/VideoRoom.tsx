@@ -12,6 +12,7 @@ import {
   MicOff,
   VideoOff,
   Wifi,
+  Radio,
 } from 'lucide-react';
 
 interface VideoRoomProps {
@@ -27,7 +28,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   initialVideo,
   onLeave,
 }) => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const [manager] = useState(() => new WebRTCManager());
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -39,6 +40,10 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+
+  const [hasRemotePeer, setHasRemotePeer] = useState(false);
+  const [remotePeerEmail, setRemotePeerEmail] = useState<string | null>(null);
+  const [peerCount, setPeerCount] = useState(1);
 
   const [networkStats, setNetworkStats] = useState<NetworkQualityStats>({
     rtt: 32,
@@ -55,7 +60,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       id: 'm1',
       senderId: 'sys',
       senderEmail: 'system@auracall.internal',
-      text: `Connected to room: ${roomId}. Microservices Gateway and SFU channels active.`,
+      text: `Connected to room: ${roomId}. Microservices Gateway and WebRTC P2P signaling active.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSelf: false,
     },
@@ -71,23 +76,52 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           if (active) setNetworkStats(stats);
         },
         (remoteStream) => {
-          if (remoteVideoRef.current && active) {
-            remoteVideoRef.current.srcObject = remoteStream;
+          console.log('[VIDEOROOM] Remote stream received from peer:', remoteStream);
+          if (active) {
+            setHasRemotePeer(true);
+            setPeerCount(2);
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = remoteStream;
+              remoteVideoRef.current.play().catch((err) => {
+                console.warn('[VIDEOROOM] Remote video autoplay error:', err);
+              });
+            }
+          }
+        },
+        (chatMsg) => {
+          if (active) {
+            setMessages((prev) => [...prev, chatMsg]);
+          }
+        },
+        (status) => {
+          if (active) {
+            console.log('[VIDEOROOM] Peer status updated:', status);
+            setHasRemotePeer(status.connected);
+            if (status.connected) {
+              setPeerCount(status.peersCount || 2);
+              if (status.email) setRemotePeerEmail(status.email);
+            } else {
+              setPeerCount(1);
+              setRemotePeerEmail(null);
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = null;
+              }
+            }
           }
         }
       );
 
+      // Acquire local camera & microphone
       const stream = await manager.getLocalMedia(!isVideoOff, !isAudioMuted);
       if (localVideoRef.current && active) {
         localVideoRef.current.srcObject = stream;
       }
 
-      // Also set remote preview with adaptive stream
-      if (remoteVideoRef.current && active) {
-        remoteVideoRef.current.srcObject = stream;
+      // Connect to WebSocket signaling server
+      if (active) {
+        manager.connectSignaling(roomId, token || '');
+        manager.startNetworkMonitoring();
       }
-
-      manager.startNetworkMonitoring();
     };
 
     setupCall();
@@ -101,7 +135,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       clearInterval(timer);
       manager.destroy();
     };
-  }, [manager]);
+  }, [manager, roomId, token]);
 
   const handleToggleAudio = () => {
     const nextState = !isAudioMuted;
@@ -150,6 +184,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       isSelf: true,
     };
     setMessages((prev) => [...prev, newMsg]);
+    manager.sendChatMessage(text);
   };
 
   const copyRoomCode = () => {
@@ -204,7 +239,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           {/* Participant count badge */}
           <div className="flex items-center gap-1.5 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold text-slate-200 shadow-lg backdrop-blur-xl">
             <Users className="h-4 w-4 text-slate-400" />
-            <span>2</span>
+            <span>{peerCount}</span>
           </div>
         </div>
       </header>
@@ -212,18 +247,58 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       {/* Main Video Arena */}
       <div className="flex-1 w-full h-full p-4 pb-24 pt-20 flex items-center justify-center">
         <div className="relative w-full h-full max-w-7xl max-h-[90vh] rounded-3xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-2xl flex items-center justify-center">
-          {/* Main Remote Video */}
+          {/* Main Remote Video (Always mounted to capture ontrack immediately) */}
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
             className={`w-full h-full object-cover transition-opacity duration-300 ${
-              networkStats.tier === 'critical-audio-only' ? 'opacity-20 blur-md' : 'opacity-100'
+              !hasRemotePeer
+                ? 'hidden'
+                : networkStats.tier === 'critical-audio-only'
+                ? 'opacity-20 blur-md'
+                : 'opacity-100'
             }`}
           />
 
+          {/* Waiting for Peer State */}
+          {!hasRemotePeer && (
+            <div className="flex flex-col items-center justify-center p-8 text-center max-w-lg z-10">
+              <div className="relative mb-6">
+                <div className="h-20 w-20 rounded-full bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center animate-pulse">
+                  <Radio className="h-9 w-9 text-cyan-400 animate-pulse" />
+                </div>
+                <span className="absolute -top-1 -right-1 flex h-4 w-4">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-500"></span>
+                </span>
+              </div>
+
+              <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Waiting for peer to connect...</h2>
+              <p className="text-sm text-slate-400 mb-6 max-w-md leading-relaxed">
+                Enter room code <span className="font-mono text-cyan-300 font-semibold">{roomId}</span> on your second device or send this link to start live video & audio call.
+              </p>
+
+              <div className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-inner">
+                <span className="font-mono text-sm text-cyan-300 font-semibold px-2">{roomId}</span>
+                <button
+                  onClick={copyRoomCode}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition shadow-md"
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  <span>{copied ? 'Copied Room ID!' : 'Copy Code'}</span>
+                </button>
+              </div>
+
+              <div className="mt-6 flex items-center gap-2 text-[11px] font-mono text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>WebRTC Signaling Live • Ready for P2P Handshake</span>
+              </div>
+            </div>
+          )}
+
           {/* Extreme Network Critical Audio-Only Banner */}
-          {networkStats.tier === 'critical-audio-only' && (
+          {hasRemotePeer && networkStats.tier === 'critical-audio-only' && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 backdrop-blur-sm z-10 text-center p-6">
               <div className="h-16 w-16 rounded-full bg-rose-500/20 border border-rose-500/50 flex items-center justify-center animate-pulse">
                 <Wifi className="h-8 w-8 text-rose-400" />
@@ -239,12 +314,14 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           )}
 
           {/* Remote Peer Label */}
-          <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 rounded-xl bg-black/60 px-3 py-1.5 backdrop-blur-md border border-slate-800 text-xs text-slate-200">
-            <span>Remote Peer (Simulcast Downlink)</span>
-            <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-mono text-cyan-400">
-              {networkStats.resolution}
-            </span>
-          </div>
+          {hasRemotePeer && (
+            <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 rounded-xl bg-black/60 px-3 py-1.5 backdrop-blur-md border border-slate-800 text-xs text-slate-200">
+              <span>{remotePeerEmail ? `Peer (${remotePeerEmail.split('@')[0]})` : 'Remote Peer'}</span>
+              <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-mono text-cyan-400">
+                {networkStats.resolution}
+              </span>
+            </div>
+          )}
 
           {/* Floating Local Stream PiP */}
           <div className="absolute bottom-5 right-5 z-20 w-52 md:w-64 aspect-video rounded-2xl overflow-hidden border-2 border-slate-700 bg-slate-950 shadow-2xl group">

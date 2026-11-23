@@ -50,6 +50,11 @@ wss.on('connection', (ws, req) => {
       const { type, payload } = message;
 
       switch (type) {
+        case 'ping': {
+          ws.send(JSON.stringify({ type: 'pong' }));
+          break;
+        }
+
         case 'join-room': {
           const { roomId } = payload;
           ws.currentRoom = roomId;
@@ -57,7 +62,7 @@ wss.on('connection', (ws, req) => {
           if (!rooms.has(roomId)) {
             rooms.set(roomId, new Set());
           }
-          rooms.get(roomId).add(ws);
+          const roomSet = rooms.get(roomId);
 
           // Notify existing peers
           broadcastToRoom(roomId, ws, {
@@ -65,9 +70,15 @@ wss.on('connection', (ws, req) => {
             payload: { peerId: ws.userId, email: ws.email },
           });
 
+          roomSet.add(ws);
+
           ws.send(JSON.stringify({
             type: 'room-joined',
-            payload: { roomId, peerId: ws.userId },
+            payload: { 
+              roomId, 
+              peerId: ws.userId,
+              peersCount: roomSet.size,
+            },
           }));
           break;
         }
