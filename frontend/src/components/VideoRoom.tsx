@@ -56,6 +56,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [iceState, setIceState] = useState<RTCIceConnectionState>('new');
   const [showTurnModal, setShowTurnModal] = useState(false);
   const [hasCustomTurn, setHasCustomTurn] = useState(() => WebRTCManager.hasCustomTurn());
+  const [isVideoFitContain, setIsVideoFitContain] = useState(false);
 
   // TURN Modal Form State
   const [turnUrl, setTurnUrl] = useState('turn:standard.relay.metered.ca:80');
@@ -408,9 +409,12 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             autoPlay
             playsInline
             muted
-            className={`w-full h-full object-cover transition-opacity duration-500 ${
+            style={{ imageRendering: '-webkit-optimize-contrast' }}
+            className={`w-full h-full transition-all duration-300 ${
+              isVideoFitContain ? 'object-contain' : 'object-cover'
+            } ${
               hasRemoteStream
-                ? networkStats.tier === 'critical-audio-only'
+                ? networkStats.tier === 'critical-audio-only' && (iceState === 'connected' || iceState === 'completed')
                   ? 'opacity-20 blur-md'
                   : 'opacity-100'
                 : 'opacity-0 pointer-events-none absolute'
@@ -537,6 +541,13 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-mono text-cyan-400">
                 {networkStats.resolution}
               </span>
+              <button
+                onClick={() => setIsVideoFitContain(!isVideoFitContain)}
+                title="Toggle between HD 1:1 Sharp Fit and Screen Fill"
+                className="ml-1 rounded bg-slate-800/80 hover:bg-slate-700 px-2 py-0.5 text-[10px] font-semibold text-cyan-300 border border-slate-700 transition"
+              >
+                {isVideoFitContain ? 'Fit (1:1 HD)' : 'Fill Screen'}
+              </button>
             </div>
           )}
 
@@ -553,6 +564,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
                 autoPlay
                 playsInline
                 muted
+                style={{ imageRendering: '-webkit-optimize-contrast' }}
                 className="w-full h-full object-cover transform -scale-x-100"
               />
             )}

@@ -123,6 +123,7 @@ export class WebRTCManager {
         const state = this.peerConnection?.iceConnectionState;
         console.log('[WEBRTC] ICE connection state:', state);
         if (state === 'connected' || state === 'completed') {
+          this.setHighDefinitionVideoParameters();
           this.onPeerStatusCallback?.({ connected: true, iceState: state });
         } else if (state === 'disconnected' || state === 'failed' || state === 'closed') {
           this.onPeerStatusCallback?.({ connected: false, iceState: state });
@@ -153,8 +154,9 @@ export class WebRTCManager {
         video: video
           ? {
               facingMode: 'user',
-              width: { ideal: 1280 },
-              height: { ideal: 720 },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+              frameRate: { ideal: 30 },
             }
           : false,
       });
@@ -329,16 +331,60 @@ export class WebRTCManager {
     this.sendSignal('chat-message', { text });
   }
 
+  private boostSdpBitrate(sdp: string): string {
+    if (!sdp) return sdp;
+    let modified = sdp;
+    // Inject b=AS:4000 (4 Mbps) and b=TIAS:4000000 into m=video section
+    if (modified.includes('m=video') && !modified.includes('b=AS:')) {
+      modified = modified.replace(/(m=video [^\r\n]+\r?\n)/, '$1b=AS:4000\r\nb=TIAS:4000000\r\n');
+    }
+    return modified;
+  }
+
+  public async setHighDefinitionVideoParameters() {
+    if (!this.peerConnection) return;
+    try {
+      const senders = this.peerConnection.getSenders();
+      for (const sender of senders) {
+        if (sender.track && sender.track.kind === 'video') {
+          const params = sender.getParameters();
+          if (!params.encodings || params.encodings.length === 0) {
+            params.encodings = [{}];
+          }
+          // Set 4 Mbps maximum bitrate for crystal-clear 1080p/720p HD
+          params.encodings[0].maxBitrate = 4000000;
+          params.encodings[0].maxFramerate = 30;
+          params.encodings[0].scaleResolutionDownBy = 1.0; // Strictly 1:1 crisp scaling
+          // 'maintain-resolution' ensures text and facial sharpness are preserved
+          params.degradationPreference = 'maintain-resolution';
+          await sender.setParameters(params);
+          console.log('[WEBRTC] High definition video parameters applied (4 Mbps, scale 1.0, maintain-resolution)');
+        }
+        if (sender.track && sender.track.kind === 'audio') {
+          const params = sender.getParameters();
+          if (params.encodings && params.encodings.length > 0) {
+            params.encodings[0].maxBitrate = 64000; // 64 kbps high-fidelity voice
+            await sender.setParameters(params);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[WEBRTC] setHighDefinitionVideoParameters warning:', e);
+    }
+  }
+
   private async createAndSendOffer() {
     if (!this.peerConnection) return;
     try {
       const offer = await this.peerConnection.createOffer();
-      await this.peerConnection.setLocalDescription(offer);
+      const boostedSdp = this.boostSdpBitrate(offer.sdp || '');
+      await this.peerConnection.setLocalDescription({ type: offer.type, sdp: boostedSdp });
+      await this.setHighDefinitionVideoParameters();
 
       this.sendSignal('signal-offer', {
         sdp: {
           type: offer.type,
-          sdp: offer.sdp,
+          sdp: boostedSdp,
         },
       });
     } catch (err) {
@@ -372,12 +418,14 @@ export class WebRTCManager {
       }
 
       const answer = await this.peerConnection.createAnswer();
-      await this.peerConnection.setLocalDescription(answer);
+      const boostedSdp = this.boostSdpBitrate(answer.sdp || '');
+      await this.peerConnection.setLocalDescription({ type: answer.type, sdp: boostedSdp });
+      await this.setHighDefinitionVideoParameters();
 
       this.sendSignal('signal-answer', {
         sdp: {
           type: answer.type,
-          sdp: answer.sdp,
+          sdp: boostedSdp,
         },
       });
     } catch (err) {
@@ -394,6 +442,7 @@ export class WebRTCManager {
       }
 
       await this.peerConnection.setRemoteDescription(answer);
+      await this.setHighDefinitionVideoParameters();
 
       // Flush queued candidates
       while (this.iceCandidatesQueue.length > 0) {
