@@ -7,7 +7,6 @@ export interface OtpResponse {
   success: boolean;
   message: string;
   expiresInSeconds?: number;
-  devOtpCode?: string; // Provided in dev mode for instant testing without waiting for email
 }
 
 export interface VerifyResponse {
@@ -23,24 +22,22 @@ export const authApi = {
       const res = await fetch(`${API_BASE}/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(`Server returned status: ${res.status}`);
+        return {
+          success: false,
+          message: data.message || `Failed to request OTP (Status ${res.status})`,
+        };
       }
-      return await res.json();
-    } catch {
-      // Offline / Standalone Dev Fallback Simulation:
-      // Enables testing UI before microservices backend is spun up
-      console.warn('Backend not reachable at /api/v1/auth. Running in simulated SLM mode.');
-      const simulatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-      localStorage.setItem(`dev_otp_${email}`, simulatedOtp);
+      return data;
+    } catch (err: unknown) {
+      console.error('Error contacting Auth Service:', err);
       return {
-        success: true,
-        message: 'SLM Mailer: OTP generated and dispatched to your email inbox.',
-        expiresInSeconds: 300,
-        devOtpCode: simulatedOtp,
+        success: false,
+        message: 'Could not connect to Auth Service. Please check your network.',
       };
     }
   },
@@ -50,27 +47,26 @@ export const authApi = {
       const res = await fetch(`${API_BASE}/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp }),
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          otp: otp.trim(),
+        }),
       });
 
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Verification failed');
-      }
-      return await res.json();
-    } catch {
-      // Dev fallback check
-      const devOtp = localStorage.getItem(`dev_otp_${email}`);
-      if (otp === devOtp || otp === '123456') {
-        const token = 'mock-jwt-token-' + btoa(JSON.stringify({ email, exp: Date.now() + 86400000 }));
-        const user: User = {
-          id: 'usr_' + Math.random().toString(36).substring(2, 9),
-          email,
-          name: email.split('@')[0],
+        return {
+          success: false,
+          message: data.message || 'Invalid or expired OTP. Please enter the exact code from your email.',
         };
-        return { success: true, token, user };
       }
-      return { success: false, message: 'Invalid or expired OTP. Please check your email.' };
+      return data;
+    } catch (err: unknown) {
+      console.error('Error verifying OTP with Auth Service:', err);
+      return {
+        success: false,
+        message: 'Network error communicating with Auth Service. Please try again.',
+      };
     }
   },
 };

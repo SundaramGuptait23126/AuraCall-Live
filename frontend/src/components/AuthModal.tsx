@@ -13,7 +13,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [helperCode, setHelperCode] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
 
   const startCountdown = () => {
@@ -42,9 +41,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       const res = await requestOtp(email);
       if (res.success) {
         setStep('otp');
-        if (res.devOtpCode) {
-          setHelperCode(res.devOtpCode);
-        }
         startCountdown();
       } else {
         setError(res.message || 'Failed to dispatch OTP');
@@ -171,26 +167,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                   maxLength={6}
                   value={otp}
                   onChange={(e) => setOtp(e.target.value.replace(/\D/g, ''))}
-                  placeholder="123456"
+                  placeholder="••••••"
                   required
                   className="w-full rounded-xl border border-slate-700 bg-slate-800/80 py-2.5 pl-10 pr-4 text-center font-mono text-lg tracking-widest text-white placeholder-slate-600 focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500 transition"
                 />
               </div>
             </div>
-
-            {/* Dev helper pill so developer or tester can quickly click & test */}
-            {helperCode && (
-              <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/30 p-2.5 text-xs text-cyan-300 flex items-center justify-between">
-                <span>Dev SLM Mail Code: <strong className="font-mono text-cyan-200">{helperCode}</strong></span>
-                <button
-                  type="button"
-                  onClick={() => setOtp(helperCode)}
-                  className="rounded bg-cyan-600/40 hover:bg-cyan-600/70 px-2 py-0.5 text-[11px] font-semibold text-white transition"
-                >
-                  Auto-fill
-                </button>
-              </div>
-            )}
 
             <button
               type="submit"

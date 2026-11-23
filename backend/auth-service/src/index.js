@@ -146,7 +146,6 @@ app.post('/request-otp', async (req, res) => {
         ? 'SLM Engine generated OTP and dispatched it to your email inbox.'
         : 'OTP generated and dispatched to your email address.',
       expiresInSeconds: 300,
-      devOtpCode: process.env.NODE_ENV !== 'production' ? finalOtp : undefined,
     });
   } catch (err) {
     console.error('[AUTH-SERVICE] Error requesting OTP:', err);
