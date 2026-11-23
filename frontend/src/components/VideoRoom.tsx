@@ -15,6 +15,10 @@ import {
   Radio,
   Loader2,
   Volume2,
+  AlertTriangle,
+  Server,
+  Settings,
+  X,
 } from 'lucide-react';
 
 interface VideoRoomProps {
@@ -49,15 +53,24 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [remotePeerEmail, setRemotePeerEmail] = useState<string | null>(null);
   const [peerCount, setPeerCount] = useState(1);
   const [isAutoplayBlocked, setIsAutoplayBlocked] = useState(false);
+  const [iceState, setIceState] = useState<RTCIceConnectionState>('new');
+  const [showTurnModal, setShowTurnModal] = useState(false);
+  const [hasCustomTurn, setHasCustomTurn] = useState(() => WebRTCManager.hasCustomTurn());
+
+  // TURN Modal Form State
+  const [turnUrl, setTurnUrl] = useState('turn:standard.relay.metered.ca:80');
+  const [turnUser, setTurnUser] = useState('');
+  const [turnPass, setTurnPass] = useState('');
 
   const [networkStats, setNetworkStats] = useState<NetworkQualityStats>({
-    rtt: 32,
-    packetLoss: 0.8,
-    bitrateKbps: 1200,
-    resolution: '1280x720 @ 30fps',
+    rtt: 0,
+    packetLoss: 0,
+    bitrateKbps: 0,
+    resolution: 'Connecting...',
     tier: 'excellent',
-    codec: 'VP9 / Opus FEC',
+    codec: 'VP8 / Opus FEC',
     fecActive: false,
+    iceState: 'new',
   });
 
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -99,26 +112,44 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     const setupCall = async () => {
       manager.setCallbacks(
         (stats) => {
-          if (active) setNetworkStats(stats);
+          if (active) {
+            setNetworkStats(stats);
+            if (stats.iceState) setIceState(stats.iceState);
+          }
         },
         (_remoteStream, track) => {
-          console.log('[VIDEOROOM] Remote track received:', track.kind, track.id, track.readyState);
+          console.log('[VIDEOROOM] Remote track received:', track.kind, track.id, 'muted:', track.muted);
           if (active) {
             setHasRemotePeer(true);
             setPeerCount(2);
 
             // Handle video track
             if (track.kind === 'video') {
-              console.log('[VIDEOROOM] Setting remote video track to MediaStream');
+              console.log('[VIDEOROOM] Binding remote video track');
               setHasRemoteStream(true);
-              if (remoteVideoRef.current) {
-                remoteVideoRef.current.muted = true;
-                remoteVideoRef.current.defaultMuted = true;
-                remoteVideoRef.current.srcObject = new MediaStream([track]);
-                remoteVideoRef.current.play().catch((err) => {
-                  console.warn('[VIDEOROOM] Remote video play error:', err);
-                });
-              }
+
+              const bindVideo = () => {
+                if (remoteVideoRef.current) {
+                  remoteVideoRef.current.muted = true;
+                  remoteVideoRef.current.defaultMuted = true;
+                  remoteVideoRef.current.srcObject = new MediaStream([track]);
+                  remoteVideoRef.current.play().catch((err) => {
+                    console.warn('[VIDEOROOM] Remote video play error:', err);
+                  });
+                }
+              };
+
+              bindVideo();
+
+              track.onunmute = () => {
+                console.log('[VIDEOROOM] Remote track UNMUTED! Video frames actively flowing.');
+                setHasRemoteStream(true);
+                bindVideo();
+              };
+
+              track.onmute = () => {
+                console.log('[VIDEOROOM] Remote track MUTED (no frames arriving or camera off).');
+              };
             }
 
             // Handle audio track via dedicated unmuted audio element
@@ -148,6 +179,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           console.log('[VIDEOROOM] Peer status updated:', status);
           if (active) {
             setHasRemotePeer(status.connected);
+            if (status.iceState) setIceState(status.iceState);
             if (status.connected) {
               setPeerCount(status.peersCount || 2);
               if (status.email) setRemotePeerEmail(status.email);
@@ -265,6 +297,31 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
   };
 
+  const handleSaveTurn = () => {
+    if (!turnUrl || !turnUser || !turnPass) {
+      alert('Please enter TURN URL, username and credential');
+      return;
+    }
+    const servers = [
+      {
+        urls: turnUrl.trim(),
+        username: turnUser.trim(),
+        credential: turnPass.trim(),
+      },
+    ];
+    WebRTCManager.saveCustomTurn(servers);
+    setHasCustomTurn(true);
+    setShowTurnModal(false);
+    window.location.reload();
+  };
+
+  const handleClearTurn = () => {
+    WebRTCManager.clearCustomTurn();
+    setHasCustomTurn(false);
+    setShowTurnModal(false);
+    window.location.reload();
+  };
+
   return (
     <div className="relative h-screen w-screen bg-slate-950 overflow-hidden flex flex-col">
       {/* Top Floating App Bar */}
@@ -287,7 +344,20 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3 pointer-events-auto">
+        <div className="flex items-center gap-2.5 pointer-events-auto">
+          {/* TURN Relay Config Pill */}
+          <button
+            onClick={() => setShowTurnModal(true)}
+            title="Configure TURN Server / Relay"
+            className="flex items-center gap-1.5 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-xl hover:bg-slate-800 transition text-slate-300"
+          >
+            <Server className={`h-3.5 w-3.5 ${hasCustomTurn ? 'text-emerald-400' : 'text-amber-400'}`} />
+            <span className="text-[11px] hidden sm:inline">
+              {hasCustomTurn ? 'TURN Relay: Active' : 'STUN Only'}
+            </span>
+            <Settings className="h-3 w-3 text-slate-500 ml-0.5" />
+          </button>
+
           {/* Network Health Indicator Pill */}
           <button
             onClick={() => setIsStatsOpen(!isStatsOpen)}
@@ -298,7 +368,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               {networkStats.tier.replace('-', ' ')}
             </span>
             <span className="rounded bg-black/40 px-1.5 py-0.5 text-[10px] font-mono text-slate-400">
-              {networkStats.rtt}ms
+              {networkStats.rtt > 0 ? `${networkStats.rtt}ms` : '--'}
             </span>
           </button>
 
@@ -307,11 +377,30 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             <Users className="h-4 w-4 text-slate-400" />
             <span>{peerCount}</span>
           </div>
+
+          {/* ICE Connection Status Badge */}
+          <div
+            title={`WebRTC ICE State: ${iceState}`}
+            className="flex items-center gap-1.5 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-3 py-2 text-xs font-semibold shadow-lg backdrop-blur-xl"
+          >
+            <span
+              className={`h-2 w-2 rounded-full ${
+                iceState === 'connected' || iceState === 'completed'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : iceState === 'failed' || iceState === 'disconnected'
+                  ? 'bg-rose-500'
+                  : 'bg-amber-400 animate-ping'
+              }`}
+            />
+            <span className="font-mono text-[11px] text-slate-300 uppercase">
+              {iceState}
+            </span>
+          </div>
         </div>
       </header>
 
       {/* Main Video Arena */}
-      <div className="flex-1 w-full h-full p-4 pb-24 pt-20 flex items-center justify-center">
+      <div className="flex-1 w-full h-full p-4 pb-24 pt-20 flex items-center justify-center relative">
         <div className="relative w-full h-full max-w-7xl max-h-[90vh] rounded-3xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-2xl flex items-center justify-center">
           {/* Main Remote Video: ALWAYS MUTED so browser never pauses or blocks video decoding */}
           <video
@@ -345,6 +434,31 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             </div>
           )}
 
+          {/* Symmetric NAT Diagnostic Banner on ICE failure */}
+          {iceState === 'failed' && (
+            <div className="absolute top-6 z-40 max-w-lg mx-auto p-4 rounded-2xl bg-rose-950/90 border border-rose-600 text-white shadow-2xl backdrop-blur-xl animate-fade-in flex flex-col gap-2.5">
+              <div className="flex items-center gap-2 text-rose-300 font-bold text-xs uppercase tracking-wider">
+                <AlertTriangle className="h-4 w-4 text-rose-400" />
+                <span>Symmetric NAT Firewall Block (Black Screen)</span>
+              </div>
+              <p className="text-xs text-rose-100/90 leading-relaxed">
+                Direct P2P UDP packets cannot reach through cellular carrier firewall (Airtel/Jio 4G/5G).
+              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <span className="text-[11px] font-semibold text-rose-200">Zero-setup Fix:</span>
+                <span className="text-[11px] bg-rose-900/60 px-2.5 py-1 rounded-lg border border-rose-700/60">
+                  Connect both devices to same Wi-Fi or Phone Hotspot
+                </span>
+                <button
+                  onClick={() => setShowTurnModal(true)}
+                  className="text-[11px] bg-rose-500 hover:bg-rose-400 text-slate-950 px-3 py-1 rounded-lg font-bold transition ml-auto"
+                >
+                  Add Free TURN Relay
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* State 1: Peer has joined signaling, but video track is not ready yet */}
           {hasRemotePeer && !hasRemoteStream && (
             <div className="flex flex-col items-center justify-center p-8 text-center max-w-md z-10 animate-fade-in">
@@ -359,7 +473,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               </p>
               <div className="flex items-center gap-2 rounded-full bg-slate-950/80 border border-slate-800 px-3 py-1 text-[11px] font-mono text-cyan-400">
                 <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-                <span>P2P Media Channel Active</span>
+                <span>ICE State: {iceState.toUpperCase()}</span>
               </div>
             </div>
           )}
@@ -457,6 +571,109 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
           </div>
         </div>
       </div>
+
+      {/* TURN Relay Settings Modal */}
+      {showTurnModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4 animate-fade-in">
+          <div className="w-full max-w-lg rounded-3xl border border-slate-800 bg-slate-900 p-6 shadow-2xl text-slate-200">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Server className="h-5 w-5 text-cyan-400" />
+                <h3 className="font-bold text-base text-white">WebRTC TURN Relay Settings</h3>
+              </div>
+              <button
+                onClick={() => setShowTurnModal(false)}
+                className="rounded-full p-1 text-slate-400 hover:text-white hover:bg-slate-800 transition"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs leading-relaxed">
+              <div className="p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-800/40 text-cyan-200">
+                <span className="font-bold text-cyan-300 block mb-1">💡 Why do you need a TURN server?</span>
+                When one device is on mobile data (Airtel/Jio 4G/5G) and another is on Wi-Fi, mobile carriers block direct P2P UDP packets (Symmetric CGNAT). A TURN server relays the encrypted video frames through ports 80/443.
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">TURN Server URL</label>
+                  <input
+                    type="text"
+                    value={turnUrl}
+                    onChange={(e) => setTurnUrl(e.target.value)}
+                    placeholder="turn:standard.relay.metered.ca:80"
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Username / Key</label>
+                  <input
+                    type="text"
+                    value={turnUser}
+                    onChange={(e) => setTurnUser(e.target.value)}
+                    placeholder="Your Metered / Xirsys username"
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 mb-1">Password / Credential</label>
+                  <input
+                    type="password"
+                    value={turnPass}
+                    onChange={(e) => setTurnPass(e.target.value)}
+                    placeholder="Your credential"
+                    className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400">
+                <span className="text-slate-300 font-semibold block mb-0.5">Free TURN Option:</span>
+                Get free 20 GB/month TURN credentials in 60 seconds at{' '}
+                <a
+                  href="https://www.metered.ca/tools/openrelay/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-cyan-400 underline font-semibold"
+                >
+                  metered.ca/tools/openrelay
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-between gap-3 pt-4 border-t border-slate-800">
+              {hasCustomTurn ? (
+                <button
+                  onClick={handleClearTurn}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-400 text-xs font-semibold transition"
+                >
+                  Clear Custom TURN
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowTurnModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveTurn}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-slate-950 text-xs font-bold hover:brightness-110 transition shadow-lg"
+                >
+                  Save & Reconnect
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating HUD & Chat Modals */}
       <NetworkStatsHUD

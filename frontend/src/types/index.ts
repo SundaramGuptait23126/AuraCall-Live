@@ -12,8 +12,11 @@ export interface NetworkQualityStats {
   bitrateKbps: number; // current video bitrate
   resolution: string; // e.g. "1280x720", "640x360", "320x180", "Audio Only"
   tier: NetworkTier;
-  codec: string; // VP9 / AV1 / VP8
+  codec: string; // VP8 / VP9 / H264
   fecActive: boolean;
+  iceState?: RTCIceConnectionState;
+  framesDecoded?: number;
+  isRealStats?: boolean;
 }
 
 export interface ChatMessage {

@@ -5,6 +5,25 @@ const jwt = require('jsonwebtoken');
 const PORT = process.env.PORT || 4003;
 const JWT_SECRET = process.env.JWT_SECRET || 'auracall-super-secure-jwt-key-9923847';
 
+// Dynamic STUN and TURN server generator for clients
+function getIceServers() {
+  const servers = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
+  ];
+  if (process.env.TURN_URL && process.env.TURN_USERNAME && process.env.TURN_PASSWORD) {
+    servers.push({
+      urls: process.env.TURN_URL.split(',').map((u) => u.trim()),
+      username: process.env.TURN_USERNAME,
+      credential: process.env.TURN_PASSWORD,
+    });
+  }
+  return servers;
+}
+
 // Create standard HTTP server for Render health checks and WebSockets
 const server = http.createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
@@ -78,6 +97,7 @@ wss.on('connection', (ws, req) => {
               roomId, 
               peerId: ws.userId,
               peersCount: roomSet.size,
+              iceServers: getIceServers(),
             },
           }));
           break;

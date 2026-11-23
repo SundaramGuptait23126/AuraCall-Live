@@ -12,12 +12,22 @@ export class WebRTCManager {
   private isCaller: boolean = false;
   private iceCandidatesQueue: RTCIceCandidateInit[] = [];
 
+  // Real telemetry tracking
+  private prevBytesReceived: number = 0;
+  private prevTimestamp: number = 0;
+  private isManualSimulation: boolean = false;
+
   private onStatsCallback?: (stats: NetworkQualityStats) => void;
   private onTrackCallback?: (stream: MediaStream, track: MediaStreamTrack) => void;
   private onChatCallback?: (msg: ChatMessage) => void;
-  private onPeerStatusCallback?: (status: { connected: boolean; email?: string; peersCount?: number }) => void;
+  private onPeerStatusCallback?: (status: {
+    connected: boolean;
+    email?: string;
+    peersCount?: number;
+    iceState?: RTCIceConnectionState;
+  }) => void;
 
-  // Adaptive low-network state
+  // Adaptive network state
   private currentTier: NetworkTier = 'excellent';
   private simulatedLoss: number = 0.5; // %
   private simulatedRtt: number = 35; // ms
@@ -26,18 +36,62 @@ export class WebRTCManager {
     this.initPeerConnection();
   }
 
+  public static getSavedIceServers(): RTCIceServer[] {
+    const baseServers: RTCIceServer[] = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+    ];
+
+    try {
+      const stored = localStorage.getItem('auracall_turn_servers');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          console.log('[WEBRTC] Loaded custom TURN servers from storage:', parsed);
+          return [...baseServers, ...parsed];
+        }
+      }
+    } catch (e) {
+      console.warn('[WEBRTC] Could not parse stored TURN servers:', e);
+    }
+
+    if (import.meta.env.VITE_TURN_SERVERS) {
+      try {
+        const parsed = JSON.parse(import.meta.env.VITE_TURN_SERVERS);
+        if (Array.isArray(parsed)) return [...baseServers, ...parsed];
+      } catch {}
+    }
+
+    return baseServers;
+  }
+
+  public static saveCustomTurn(servers: RTCIceServer[]) {
+    localStorage.setItem('auracall_turn_servers', JSON.stringify(servers));
+  }
+
+  public static clearCustomTurn() {
+    localStorage.removeItem('auracall_turn_servers');
+  }
+
+  public static hasCustomTurn(): boolean {
+    const stored = localStorage.getItem('auracall_turn_servers');
+    if (!stored) return false;
+    try {
+      const parsed = JSON.parse(stored);
+      return Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   private initPeerConnection() {
-    // Proven, globally reachable Google, Cloudflare and Twilio STUN servers
     const rtcConfig: RTCConfiguration = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
-        { urls: 'stun:global.stun.twilio.com:3478' },
-      ],
+      iceServers: WebRTCManager.getSavedIceServers(),
       iceCandidatePoolSize: 10,
     };
 
@@ -45,7 +99,7 @@ export class WebRTCManager {
       this.peerConnection = new RTCPeerConnection(rtcConfig);
 
       this.peerConnection.ontrack = (event) => {
-        console.log('[WEBRTC] Remote track received:', event.track.kind, event.track.id);
+        console.log('[WEBRTC] Remote track received:', event.track.kind, event.track.id, 'muted:', event.track.muted);
         const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
         this.onTrackCallback?.(stream, event.track);
       };
@@ -69,23 +123,62 @@ export class WebRTCManager {
         const state = this.peerConnection?.iceConnectionState;
         console.log('[WEBRTC] ICE connection state:', state);
         if (state === 'connected' || state === 'completed') {
-          this.onPeerStatusCallback?.({ connected: true });
+          this.onPeerStatusCallback?.({ connected: true, iceState: state });
         } else if (state === 'disconnected' || state === 'failed' || state === 'closed') {
-          this.onPeerStatusCallback?.({ connected: false });
+          this.onPeerStatusCallback?.({ connected: false, iceState: state });
+        } else if (state) {
+          this.onPeerStatusCallback?.({ connected: true, iceState: state });
         }
       };
 
       this.peerConnection.onconnectionstatechange = () => {
         console.log('[WEBRTC] Connection state:', this.peerConnection?.connectionState);
       };
+
+      this.prioritizeUniversalCodecs();
     } catch (err) {
       console.warn('[WEBRTC] PeerConnection init failed:', err);
     }
   }
 
+  // Universal codec prioritization: VP8 and H264 before VP9 for smooth mobile encoding
+  private prioritizeUniversalCodecs() {
+    if (!this.peerConnection) return;
+    if (typeof RTCRtpSender !== 'undefined' && 'getCapabilities' in RTCRtpSender) {
+      try {
+        const capabilities = RTCRtpSender.getCapabilities('video');
+        if (capabilities && capabilities.codecs) {
+          const sortedCodecs = [...capabilities.codecs].sort((a, b) => {
+            const aMime = a.mimeType.toLowerCase();
+            const bMime = b.mimeType.toLowerCase();
+            const getScore = (mime: string) => {
+              if (mime.includes('vp8')) return 1;
+              if (mime.includes('h264')) return 2;
+              if (mime.includes('vp9')) return 3;
+              if (mime.includes('av1')) return 4;
+              return 5;
+            };
+            return getScore(aMime) - getScore(bMime);
+          });
+
+          const transceivers = this.peerConnection.getTransceivers();
+          for (const transceiver of transceivers) {
+            if (transceiver.receiver.track.kind === 'video' || transceiver.sender.track?.kind === 'video') {
+              if (transceiver.setCodecPreferences) {
+                transceiver.setCodecPreferences(sortedCodecs);
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('[WEBRTC] Prioritize codecs error:', e);
+      }
+    }
+  }
+
   public async getLocalMedia(video = true, audio = true): Promise<MediaStream> {
     try {
-      // Robust constraints that work across all desktop and mobile cameras (portrait/landscape)
+      // Robust constraints that work across desktop and mobile cameras (portrait/landscape)
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: audio
           ? {
@@ -110,6 +203,7 @@ export class WebRTCManager {
         stream.getTracks().forEach((track) => {
           this.peerConnection?.addTrack(track, stream);
         });
+        this.prioritizeUniversalCodecs();
       }
 
       return stream;
@@ -158,6 +252,19 @@ export class WebRTCManager {
 
             case 'room-joined': {
               console.log(`[SIGNALING] Joined room successfully: ${payload.roomId}, peers: ${payload.peersCount}`);
+              if (payload.iceServers && Array.isArray(payload.iceServers)) {
+                try {
+                  if (this.peerConnection && typeof this.peerConnection.setConfiguration === 'function') {
+                    this.peerConnection.setConfiguration({
+                      iceServers: payload.iceServers,
+                      iceCandidatePoolSize: 10,
+                    });
+                    console.log('[WEBRTC] Applied dynamic ICE servers from signaling:', payload.iceServers.length);
+                  }
+                } catch (e) {
+                  console.warn('[WEBRTC] setConfiguration error:', e);
+                }
+              }
               if (payload.peersCount && payload.peersCount > 1) {
                 this.onPeerStatusCallback?.({ connected: true, peersCount: payload.peersCount });
 
@@ -263,6 +370,7 @@ export class WebRTCManager {
   private async createAndSendOffer() {
     if (!this.peerConnection) return;
     try {
+      this.prioritizeUniversalCodecs();
       const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
 
@@ -302,6 +410,7 @@ export class WebRTCManager {
         }
       }
 
+      this.prioritizeUniversalCodecs();
       const answer = await this.peerConnection.createAnswer();
       await this.peerConnection.setLocalDescription(answer);
 
@@ -426,7 +535,12 @@ export class WebRTCManager {
     onStats: (stats: NetworkQualityStats) => void,
     onTrack: (stream: MediaStream, track: MediaStreamTrack) => void,
     onChat?: (msg: ChatMessage) => void,
-    onPeerStatus?: (status: { connected: boolean; email?: string; peersCount?: number }) => void
+    onPeerStatus?: (status: {
+      connected: boolean;
+      email?: string;
+      peersCount?: number;
+      iceState?: RTCIceConnectionState;
+    }) => void
   ) {
     this.onStatsCallback = onStats;
     this.onTrackCallback = onTrack;
@@ -438,7 +552,7 @@ export class WebRTCManager {
     if (this.statsInterval) clearInterval(this.statsInterval);
 
     this.statsInterval = window.setInterval(async () => {
-      const stats = this.computeNetworkStats();
+      const stats = await this.computeNetworkStats();
       this.onStatsCallback?.(stats);
       this.applyAdaptiveLayer(stats.tier);
     }, 2000);
@@ -452,6 +566,7 @@ export class WebRTCManager {
   }
 
   public simulateNetworkCondition(tier: NetworkTier) {
+    this.isManualSimulation = true;
     this.currentTier = tier;
     switch (tier) {
       case 'excellent':
@@ -472,34 +587,146 @@ export class WebRTCManager {
         break;
     }
 
-    const stats = this.computeNetworkStats();
-    this.onStatsCallback?.(stats);
+    const mockStats: NetworkQualityStats = {
+      rtt: this.simulatedRtt,
+      packetLoss: this.simulatedLoss,
+      bitrateKbps: tier === 'good' ? 480 : tier === 'poor' ? 140 : tier === 'critical-audio-only' ? 32 : 1200,
+      resolution:
+        tier === 'good'
+          ? '640x360 @ 24fps'
+          : tier === 'poor'
+          ? '320x180 @ 15fps'
+          : tier === 'critical-audio-only'
+          ? 'Audio Only'
+          : '1280x720 @ 30fps',
+      tier: this.currentTier,
+      codec: 'VP8 / Opus FEC',
+      fecActive: this.simulatedLoss > 3,
+      isRealStats: false,
+    };
+
+    this.onStatsCallback?.(mockStats);
     this.applyAdaptiveLayer(tier);
   }
 
-  private computeNetworkStats(): NetworkQualityStats {
-    let bitrateKbps = 1200;
-    let resolution = '1280x720 @ 30fps';
+  // Real WebRTC telemetry from browser RTCPeerConnection.getStats()
+  private async computeNetworkStats(): Promise<NetworkQualityStats> {
+    const iceState = this.peerConnection?.iceConnectionState || 'new';
 
-    if (this.currentTier === 'good') {
-      bitrateKbps = 480;
-      resolution = '640x360 @ 24fps';
-    } else if (this.currentTier === 'poor') {
-      bitrateKbps = 140;
-      resolution = '320x180 @ 15fps';
-    } else if (this.currentTier === 'critical-audio-only') {
-      bitrateKbps = 32;
-      resolution = 'Audio Only (Video Suspended for Zero Glitch)';
+    if (this.isManualSimulation) {
+      return {
+        rtt: this.simulatedRtt,
+        packetLoss: this.simulatedLoss,
+        bitrateKbps:
+          this.currentTier === 'good'
+            ? 480
+            : this.currentTier === 'poor'
+            ? 140
+            : this.currentTier === 'critical-audio-only'
+            ? 32
+            : 1200,
+        resolution:
+          this.currentTier === 'good'
+            ? '640x360 @ 24fps'
+            : this.currentTier === 'poor'
+            ? '320x180 @ 15fps'
+            : this.currentTier === 'critical-audio-only'
+            ? 'Audio Only'
+            : '1280x720 @ 30fps',
+        tier: this.currentTier,
+        codec: 'VP8 / Opus FEC',
+        fecActive: this.simulatedLoss > 3,
+        iceState,
+        isRealStats: false,
+      };
+    }
+
+    let realRtt = 0;
+    let realBitrateKbps = 0;
+    let realPacketLoss = 0;
+    let framesDecoded = 0;
+    let resolution = 'Negotiating...';
+    let detectedCodec = 'VP8 / Opus FEC';
+
+    if (this.peerConnection) {
+      try {
+        const stats = await this.peerConnection.getStats();
+        const now = Date.now();
+
+        stats.forEach((report) => {
+          // Check active candidate pair for real RTT
+          if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+            if (report.currentRoundTripTime !== undefined) {
+              realRtt = Math.round(report.currentRoundTripTime * 1000);
+            }
+          }
+
+          // Inbound RTP video track stats
+          if (report.type === 'inbound-rtp' && report.kind === 'video') {
+            framesDecoded = report.framesDecoded || 0;
+            const bytesReceived = report.bytesReceived || 0;
+
+            if (this.prevTimestamp > 0 && bytesReceived >= this.prevBytesReceived) {
+              const dtSec = (now - this.prevTimestamp) / 1000;
+              if (dtSec > 0) {
+                realBitrateKbps = Math.round(((bytesReceived - this.prevBytesReceived) * 8) / (dtSec * 1000));
+              }
+            }
+
+            this.prevBytesReceived = bytesReceived;
+            this.prevTimestamp = now;
+
+            const packetsLost = report.packetsLost || 0;
+            const packetsReceived = report.packetsReceived || 0;
+            const total = packetsLost + packetsReceived;
+            if (total > 0) {
+              realPacketLoss = Number(((packetsLost / total) * 100).toFixed(1));
+            }
+
+            if (report.frameWidth && report.frameHeight) {
+              resolution = `${report.frameWidth}x${report.frameHeight} @ ${report.framesPerSecond || 30}fps`;
+            } else if (framesDecoded > 0) {
+              resolution = 'Active Feed (Decoding)';
+            }
+          }
+
+          // Codec detection
+          if (report.type === 'codec' && report.mimeType && report.mimeType.toLowerCase().includes('video')) {
+            detectedCodec = `${report.mimeType.replace('video/', '').toUpperCase()} / Opus FEC`;
+          }
+        });
+      } catch (e) {
+        console.warn('[WEBRTC] getStats error:', e);
+      }
+    }
+
+    // Determine tier based on REAL network metrics
+    let derivedTier: NetworkTier = 'excellent';
+    if (iceState !== 'connected' && iceState !== 'completed') {
+      derivedTier = 'critical-audio-only';
+      resolution = iceState === 'failed' ? 'ICE Failed (NAT Block)' : `ICE: ${iceState.toUpperCase()}`;
+    } else if (framesDecoded === 0 && realBitrateKbps === 0) {
+      derivedTier = 'poor';
+      resolution = 'Connected • Awaiting Frames';
+    } else if (realPacketLoss > 15 || realRtt > 300) {
+      derivedTier = 'critical-audio-only';
+    } else if (realPacketLoss > 5 || realRtt > 150) {
+      derivedTier = 'poor';
+    } else if (realPacketLoss > 1.5 || realRtt > 60) {
+      derivedTier = 'good';
     }
 
     return {
-      rtt: this.simulatedRtt,
-      packetLoss: this.simulatedLoss,
-      bitrateKbps,
+      rtt: realRtt,
+      packetLoss: realPacketLoss,
+      bitrateKbps: realBitrateKbps,
       resolution,
-      tier: this.currentTier,
-      codec: 'VP9 / Opus FEC',
-      fecActive: this.simulatedLoss > 3,
+      tier: derivedTier,
+      codec: detectedCodec,
+      fecActive: realPacketLoss > 3,
+      iceState,
+      framesDecoded,
+      isRealStats: true,
     };
   }
 
