@@ -65,9 +65,9 @@ async function initDatabase() {
 
 initDatabase();
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
+// Root and Health check endpoints for UptimeRobot and Render monitoring
+app.all(['/', '/health'], (req, res) => {
+  res.status(200).json({
     status: 'ok',
     service: 'auth-service',
     database: dbPool ? 'mysql-aiven' : 'in-memory-fallback',
