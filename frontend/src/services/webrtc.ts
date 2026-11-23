@@ -1,44 +1,19 @@
 import { NetworkQualityStats, NetworkTier, ChatMessage } from '../types';
 
-function enableOpusFEC(sdp: string): string {
-  const lines = sdp.split('\r\n');
-  let opusPayload: string | null = null;
-  for (const line of lines) {
-    const m = line.match(/^a=rtpmap:(\d+)\s+opus\/48000/i);
-    if (m) {
-      opusPayload = m[1];
-      break;
-    }
-  }
-  if (!opusPayload) return sdp;
-
-  return lines
-    .map((line) => {
-      if (line.startsWith(`a=fmtp:${opusPayload}`)) {
-        let updated = line;
-        if (!updated.includes('useinbandfec=')) updated += ';useinbandfec=1';
-        if (!updated.includes('usedtx=')) updated += ';usedtx=1';
-        return updated;
-      }
-      return line;
-    })
-    .join('\r\n');
-}
-
 export class WebRTCManager {
   private localStream: MediaStream | null = null;
-  private remoteStream: MediaStream | null = null;
   private peerConnection: RTCPeerConnection | null = null;
   private ws: WebSocket | null = null;
   private statsInterval: number | null = null;
   private heartbeatInterval: number | null = null;
   private offerFallbackTimer: number | null = null;
+  private virtualStreamInterval: number | null = null;
   private roomId: string | null = null;
   private isCaller: boolean = false;
   private iceCandidatesQueue: RTCIceCandidateInit[] = [];
 
   private onStatsCallback?: (stats: NetworkQualityStats) => void;
-  private onTrackCallback?: (stream: MediaStream) => void;
+  private onTrackCallback?: (stream: MediaStream, track: MediaStreamTrack) => void;
   private onChatCallback?: (msg: ChatMessage) => void;
   private onPeerStatusCallback?: (status: { connected: boolean; email?: string; peersCount?: number }) => void;
 
@@ -52,26 +27,16 @@ export class WebRTCManager {
   }
 
   private initPeerConnection() {
+    // Proven, globally reachable Google, Cloudflare and Twilio STUN servers
     const rtcConfig: RTCConfiguration = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:openrelay.metered.ca:80' },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject',
-          credential: 'openrelayproject',
-        },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+        { urls: 'stun:global.stun.twilio.com:3478' },
       ],
       iceCandidatePoolSize: 10,
     };
@@ -80,20 +45,9 @@ export class WebRTCManager {
       this.peerConnection = new RTCPeerConnection(rtcConfig);
 
       this.peerConnection.ontrack = (event) => {
-        console.log('[WEBRTC] Remote track received:', event.track.kind, event.streams);
-        let stream = event.streams && event.streams[0];
-        if (!stream) {
-          if (!this.remoteStream) {
-            this.remoteStream = new MediaStream();
-          }
-          if (!this.remoteStream.getTracks().find((t) => t.id === event.track.id)) {
-            this.remoteStream.addTrack(event.track);
-          }
-          stream = this.remoteStream;
-        } else {
-          this.remoteStream = stream;
-        }
-        this.onTrackCallback?.(stream);
+        console.log('[WEBRTC] Remote track received:', event.track.kind, event.track.id);
+        const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+        this.onTrackCallback?.(stream, event.track);
       };
 
       this.peerConnection.onicecandidate = (event) => {
@@ -131,17 +85,20 @@ export class WebRTCManager {
 
   public async getLocalMedia(video = true, audio = true): Promise<MediaStream> {
     try {
+      // Robust constraints that work across all desktop and mobile cameras (portrait/landscape)
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: audio
+          ? {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            }
+          : false,
         video: video
           ? {
-              width: { ideal: 1280, min: 320 },
-              height: { ideal: 720, min: 180 },
-              frameRate: { ideal: 30, max: 30 },
+              facingMode: 'user',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
             }
           : false,
       });
@@ -180,7 +137,7 @@ export class WebRTCManager {
         console.log(`[SIGNALING] Connected! Joining room: ${roomId}`);
         this.sendSignal('join-room', { roomId });
 
-        // Start 20s heartbeat ping to keep Render WebSocket alive
+        // 20-second heartbeat ping to keep Render WebSocket alive
         if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
         this.heartbeatInterval = window.setInterval(() => {
           if (this.ws && this.ws.readyState === WebSocket.OPEN) {
@@ -196,21 +153,19 @@ export class WebRTCManager {
 
           switch (type) {
             case 'pong': {
-              // Heartbeat acknowledgement
               break;
             }
 
             case 'room-joined': {
               console.log(`[SIGNALING] Joined room successfully: ${payload.roomId}, peers: ${payload.peersCount}`);
               if (payload.peersCount && payload.peersCount > 1) {
-                // Another peer is already in the room!
                 this.onPeerStatusCallback?.({ connected: true, peersCount: payload.peersCount });
 
-                // Polite timer: if the existing peer does not send offer within 2.5s, create offer
+                // Polite peer fallback: if no offer arrives within 2.5s from existing member, send offer
                 if (this.offerFallbackTimer) clearTimeout(this.offerFallbackTimer);
                 this.offerFallbackTimer = window.setTimeout(async () => {
                   if (this.peerConnection && !this.peerConnection.remoteDescription) {
-                    console.log('[SIGNALING] No offer received from existing peer. Initiating offer as polite peer.');
+                    console.log('[SIGNALING] Initiating offer as polite peer.');
                     await this.createAndSendOffer();
                   }
                 }, 2500);
@@ -308,18 +263,13 @@ export class WebRTCManager {
   private async createAndSendOffer() {
     if (!this.peerConnection) return;
     try {
-      const offer = await this.peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-
+      const offer = await this.peerConnection.createOffer();
       await this.peerConnection.setLocalDescription(offer);
 
-      const modifiedSdp = offer.sdp ? enableOpusFEC(offer.sdp) : offer.sdp;
       this.sendSignal('signal-offer', {
         sdp: {
           type: offer.type,
-          sdp: modifiedSdp,
+          sdp: offer.sdp,
         },
       });
     } catch (err) {
@@ -355,11 +305,10 @@ export class WebRTCManager {
       const answer = await this.peerConnection.createAnswer();
       await this.peerConnection.setLocalDescription(answer);
 
-      const modifiedSdp = answer.sdp ? enableOpusFEC(answer.sdp) : answer.sdp;
       this.sendSignal('signal-answer', {
         sdp: {
           type: answer.type,
-          sdp: modifiedSdp,
+          sdp: answer.sdp,
         },
       });
     } catch (err) {
@@ -416,12 +365,12 @@ export class WebRTCManager {
 
     const draw = () => {
       if (ctx) {
-        hue = (hue + 1) % 360;
+        hue = (hue + 2) % 360;
         ctx.fillStyle = `hsl(${hue}, 40%, 15%)`;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         ctx.fillStyle = '#38bdf8';
-        ctx.font = '22px sans-serif';
+        ctx.font = 'bold 22px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('AuraCall HD Adaptive Feed', canvas.width / 2, canvas.height / 2 - 20);
 
@@ -433,9 +382,12 @@ export class WebRTCManager {
           canvas.height / 2 + 15
         );
       }
-      requestAnimationFrame(draw);
     };
     draw();
+
+    // Use setInterval instead of requestAnimationFrame so off-screen canvas NEVER freezes
+    if (this.virtualStreamInterval) clearInterval(this.virtualStreamInterval);
+    this.virtualStreamInterval = window.setInterval(draw, 33);
 
     const canvasStream = canvas.captureStream(30);
 
@@ -472,7 +424,7 @@ export class WebRTCManager {
 
   public setCallbacks(
     onStats: (stats: NetworkQualityStats) => void,
-    onTrack: (stream: MediaStream) => void,
+    onTrack: (stream: MediaStream, track: MediaStreamTrack) => void,
     onChat?: (msg: ChatMessage) => void,
     onPeerStatus?: (status: { connected: boolean; email?: string; peersCount?: number }) => void
   ) {
@@ -610,6 +562,10 @@ export class WebRTCManager {
 
   public destroy() {
     this.stopNetworkMonitoring();
+    if (this.virtualStreamInterval) {
+      clearInterval(this.virtualStreamInterval);
+      this.virtualStreamInterval = null;
+    }
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;

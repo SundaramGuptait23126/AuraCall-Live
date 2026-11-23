@@ -101,43 +101,42 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
         (stats) => {
           if (active) setNetworkStats(stats);
         },
-        (remoteStream) => {
-          console.log('[VIDEOROOM] Remote stream received from peer:', remoteStream);
+        (_remoteStream, track) => {
+          console.log('[VIDEOROOM] Remote track received:', track.kind, track.id, track.readyState);
           if (active) {
-            setHasRemoteStream(true);
             setHasRemotePeer(true);
             setPeerCount(2);
 
-            // 1. Muted video element: 100% immune to browser autoplay blocking
-            if (remoteVideoRef.current) {
-              if (remoteVideoRef.current.srcObject !== remoteStream) {
-                remoteVideoRef.current.srcObject = remoteStream;
-              }
-              remoteVideoRef.current.play().catch((err) => {
-                console.warn('[VIDEOROOM] Remote video play error:', err);
-              });
-            }
-
-            // 2. Dedicated audio element for pristine Opus audio
-            if (remoteAudioRef.current) {
-              if (remoteAudioRef.current.srcObject !== remoteStream) {
-                remoteAudioRef.current.srcObject = remoteStream;
-              }
-              remoteAudioRef.current
-                .play()
-                .then(() => {
-                  setIsAutoplayBlocked(false);
-                })
-                .catch((err) => {
-                  console.warn('[VIDEOROOM] Remote audio autoplay blocked by browser policy:', err);
-                  setIsAutoplayBlocked(true);
+            // Handle video track
+            if (track.kind === 'video') {
+              console.log('[VIDEOROOM] Setting remote video track to MediaStream');
+              setHasRemoteStream(true);
+              if (remoteVideoRef.current) {
+                remoteVideoRef.current.muted = true;
+                remoteVideoRef.current.defaultMuted = true;
+                remoteVideoRef.current.srcObject = new MediaStream([track]);
+                remoteVideoRef.current.play().catch((err) => {
+                  console.warn('[VIDEOROOM] Remote video play error:', err);
                 });
+              }
             }
 
-            remoteStream.onaddtrack = () => {
-              if (remoteVideoRef.current) remoteVideoRef.current.play().catch(() => {});
-              if (remoteAudioRef.current) remoteAudioRef.current.play().catch(() => {});
-            };
+            // Handle audio track via dedicated unmuted audio element
+            if (track.kind === 'audio') {
+              console.log('[VIDEOROOM] Setting remote audio track');
+              if (remoteAudioRef.current) {
+                remoteAudioRef.current.srcObject = new MediaStream([track]);
+                remoteAudioRef.current
+                  .play()
+                  .then(() => {
+                    setIsAutoplayBlocked(false);
+                  })
+                  .catch((err) => {
+                    console.warn('[VIDEOROOM] Remote audio autoplay blocked:', err);
+                    setIsAutoplayBlocked(true);
+                  });
+              }
+            }
           }
         },
         (chatMsg) => {
@@ -346,7 +345,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
             </div>
           )}
 
-          {/* State 1: Peer has joined signaling, but stream is negotiating */}
+          {/* State 1: Peer has joined signaling, but video track is not ready yet */}
           {hasRemotePeer && !hasRemoteStream && (
             <div className="flex flex-col items-center justify-center p-8 text-center max-w-md z-10 animate-fade-in">
               <div className="relative mb-6">
@@ -356,11 +355,11 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               </div>
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Peer...</h2>
               <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
-                Peer ({remotePeerEmail ? remotePeerEmail.split('@')[0] : 'Remote'}) joined. Establishing secure WebRTC P2P stream via STUN/TURN relays...
+                Peer ({remotePeerEmail ? remotePeerEmail.split('@')[0] : 'Remote'}) connected. Synchronizing video streams...
               </p>
               <div className="flex items-center gap-2 rounded-full bg-slate-950/80 border border-slate-800 px-3 py-1 text-[11px] font-mono text-cyan-400">
                 <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
-                <span>Exchanging ICE Candidates</span>
+                <span>P2P Media Channel Active</span>
               </div>
             </div>
           )}
