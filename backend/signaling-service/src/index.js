@@ -1,10 +1,22 @@
+const http = require('http');
 const { WebSocketServer } = require('ws');
 const jwt = require('jsonwebtoken');
 
 const PORT = process.env.PORT || 4003;
 const JWT_SECRET = process.env.JWT_SECRET || 'auracall-super-secure-jwt-key-9923847';
 
-const wss = new WebSocketServer({ port: PORT });
+// Create standard HTTP server for Render health checks and WebSockets
+const server = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', service: 'signaling-service', timestamp: new Date().toISOString() }));
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
+const wss = new WebSocketServer({ server });
 
 // room Map: roomId -> Set of client WebSockets
 const rooms = new Map();
@@ -110,4 +122,6 @@ function broadcastToRoom(roomId, senderWs, packet) {
   }
 }
 
-console.log(`[SIGNALING-SERVICE] WebSocket server listening on port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`[SIGNALING-SERVICE] HTTP & WebSocket server listening on port ${PORT}`);
+});

@@ -7,7 +7,11 @@ const PORT = process.env.PORT || 4001;
 const JWT_SECRET = process.env.JWT_SECRET || 'auracall-super-secure-jwt-key-9923847';
 const SLM_SERVICE_URL = process.env.SLM_SERVICE_URL || 'http://slm-mailer:5000';
 
-app.use(cors());
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 app.use(express.json());
 
 // In-memory fallback if Redis container is not running during local dev
