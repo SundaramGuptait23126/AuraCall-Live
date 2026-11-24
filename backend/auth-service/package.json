@@ -7,10 +7,13 @@
     "start": "node src/index.js"
   },
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
     "cors": "^2.8.5",
     "express": "^4.19.2",
-    "jsonwebtoken": "^9.0.2",
     "ioredis": "^5.4.1",
-    "mysql2": "^3.11.0"
+    "jsonwebtoken": "^9.0.2",
+    "mysql2": "^3.11.0",
+    "pino": "^10.4.0",
+    "qrcode": "^1.5.4"
   }
 }

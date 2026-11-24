@@ -14,6 +14,8 @@ build/
 .env.local
 .env.*.local
 !.env.example
+baileys_auth/
+*/baileys_auth/
 
 # Logs & Debug
 npm-debug.log*

@@ -7,8 +7,8 @@ interface AuthContextType {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  requestOtp: (email: string) => Promise<OtpResponse>;
-  verifyOtp: (email: string, otp: string) => Promise<VerifyResponse>;
+  requestOtp: (identifier: string) => Promise<OtpResponse>;
+  verifyOtp: (identifier: string, otp: string) => Promise<VerifyResponse>;
   logout: () => void;
 }
 
@@ -37,12 +37,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
   }, []);
 
-  const requestOtp = async (email: string): Promise<OtpResponse> => {
-    return await authApi.requestOtp(email);
+  const requestOtp = async (identifier: string): Promise<OtpResponse> => {
+    return await authApi.requestOtp(identifier);
   };
 
-  const verifyOtp = async (email: string, otp: string): Promise<VerifyResponse> => {
-    const res = await authApi.verifyOtp(email, otp);
+  const verifyOtp = async (identifier: string, otp: string): Promise<VerifyResponse> => {
+    const res = await authApi.verifyOtp(identifier, otp);
     if (res.success && res.token && res.user) {
       setToken(res.token);
       setUser(res.user);

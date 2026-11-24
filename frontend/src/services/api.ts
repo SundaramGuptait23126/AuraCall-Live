@@ -7,6 +7,8 @@ export interface OtpResponse {
   success: boolean;
   message: string;
   expiresInSeconds?: number;
+  channel?: 'email' | 'whatsapp';
+  qrUrl?: string;
 }
 
 export interface VerifyResponse {
@@ -17,12 +19,18 @@ export interface VerifyResponse {
 }
 
 export const authApi = {
-  async requestOtp(email: string): Promise<OtpResponse> {
+  async requestOtp(identifier: string): Promise<OtpResponse> {
     try {
+      const isEmail = identifier.includes('@');
+      const clean = isEmail ? identifier.trim().toLowerCase() : identifier.trim();
       const res = await fetch(`${API_BASE}/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({
+          email: clean,
+          phone: clean,
+          identifier: clean,
+        }),
       });
 
       const data = await res.json().catch(() => ({}));
@@ -30,6 +38,7 @@ export const authApi = {
         return {
           success: false,
           message: data.message || `Failed to request OTP (Status ${res.status})`,
+          qrUrl: data.qrUrl,
         };
       }
       return data;
@@ -42,13 +51,17 @@ export const authApi = {
     }
   },
 
-  async verifyOtp(email: string, otp: string): Promise<VerifyResponse> {
+  async verifyOtp(identifier: string, otp: string): Promise<VerifyResponse> {
     try {
+      const isEmail = identifier.includes('@');
+      const clean = isEmail ? identifier.trim().toLowerCase() : identifier.trim();
       const res = await fetch(`${API_BASE}/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: email.trim().toLowerCase(),
+          email: clean,
+          phone: clean,
+          identifier: clean,
           otp: otp.trim(),
         }),
       });
@@ -57,7 +70,7 @@ export const authApi = {
       if (!res.ok) {
         return {
           success: false,
-          message: data.message || 'Invalid or expired OTP. Please enter the exact code from your email.',
+          message: data.message || 'Invalid or expired OTP. Please enter the exact code sent to you.',
         };
       }
       return data;
