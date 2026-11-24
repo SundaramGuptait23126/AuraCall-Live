@@ -69,7 +69,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
     bitrateKbps: 0,
     resolution: 'Connecting...',
     tier: 'excellent',
-    codec: 'H.264 / VP8 (60fps) / Opus FEC',
+    codec: 'VP8 / H.264 / Opus FEC',
     fecActive: false,
     iceState: 'new',
   });

@@ -31,9 +31,9 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoinRoom }) => {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'user',
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            frameRate: { ideal: 60, max: 60 },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            frameRate: { ideal: 60, min: 24 },
           },
           audio: true,
         });
