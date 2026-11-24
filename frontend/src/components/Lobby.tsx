@@ -29,7 +29,12 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoinRoom }) => {
     const startPreview = async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
+          video: {
+            facingMode: 'user',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 60, max: 60 },
+          },
           audio: true,
         });
         setPreviewStream(stream);

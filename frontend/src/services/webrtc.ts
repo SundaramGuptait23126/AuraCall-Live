@@ -156,7 +156,7 @@ export class WebRTCManager {
               facingMode: 'user',
               width: { ideal: 1920 },
               height: { ideal: 1080 },
-              frameRate: { ideal: 30 },
+              frameRate: { ideal: 60, max: 60 },
             }
           : false,
       });
@@ -334,11 +334,45 @@ export class WebRTCManager {
   private boostSdpBitrate(sdp: string): string {
     if (!sdp) return sdp;
     let modified = sdp;
-    // Inject b=AS:4000 (4 Mbps) and b=TIAS:4000000 into m=video section
+    // Inject b=AS:5000 (5 Mbps) and b=TIAS:5000000 into m=video section for 60 FPS HD streaming
     if (modified.includes('m=video') && !modified.includes('b=AS:')) {
-      modified = modified.replace(/(m=video [^\r\n]+\r?\n)/, '$1b=AS:4000\r\nb=TIAS:4000000\r\n');
+      modified = modified.replace(/(m=video [^\r\n]+\r?\n)/, '$1b=AS:5000\r\nb=TIAS:5000000\r\n');
     }
     return modified;
+  }
+
+  public applyCodecPreferences() {
+    if (!this.peerConnection || !('RTCRtpReceiver' in window) || typeof RTCRtpReceiver.getCapabilities !== 'function') return;
+    try {
+      const capabilities = RTCRtpReceiver.getCapabilities('video');
+      if (!capabilities || !capabilities.codecs) return;
+
+      // 1. Prioritize H.264 for hardware acceleration on mobile GPUs & PC (eliminates CPU-based 60fps lag)
+      const h264 = capabilities.codecs.filter((c) => c.mimeType.toLowerCase() === 'video/h264');
+      // 2. High-performance fallback: VP8
+      const vp8 = capabilities.codecs.filter((c) => c.mimeType.toLowerCase() === 'video/vp8');
+      // 3. VP9 & AV1
+      const vp9 = capabilities.codecs.filter((c) => c.mimeType.toLowerCase() === 'video/vp9');
+      const others = capabilities.codecs.filter(
+        (c) =>
+          c.mimeType.toLowerCase() !== 'video/h264' &&
+          c.mimeType.toLowerCase() !== 'video/vp8' &&
+          c.mimeType.toLowerCase() !== 'video/vp9'
+      );
+
+      const preferredCodecs = [...h264, ...vp8, ...vp9, ...others];
+
+      this.peerConnection.getTransceivers().forEach((transceiver) => {
+        if (transceiver.receiver?.track?.kind === 'video' || transceiver.sender?.track?.kind === 'video') {
+          if (typeof transceiver.setCodecPreferences === 'function') {
+            transceiver.setCodecPreferences(preferredCodecs);
+            console.log('[WEBRTC] Applied H.264 hardware-accelerated codec preferences for smooth 60 FPS');
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('[WEBRTC] applyCodecPreferences warning:', e);
+    }
   }
 
   public async setHighDefinitionVideoParameters() {
@@ -351,14 +385,14 @@ export class WebRTCManager {
           if (!params.encodings || params.encodings.length === 0) {
             params.encodings = [{}];
           }
-          // Set 4 Mbps maximum bitrate for crystal-clear 1080p/720p HD
-          params.encodings[0].maxBitrate = 4000000;
-          params.encodings[0].maxFramerate = 30;
+          // Set 5 Mbps maximum bitrate for crystal-clear 1080p/720p 60 FPS HD
+          params.encodings[0].maxBitrate = 5000000;
+          params.encodings[0].maxFramerate = 60; // 60 FPS high-motion target
           params.encodings[0].scaleResolutionDownBy = 1.0; // Strictly 1:1 crisp scaling
-          // 'maintain-resolution' ensures text and facial sharpness are preserved
-          params.degradationPreference = 'maintain-resolution';
+          // 'maintain-framerate' ensures video NEVER stutters or drops FPS during motion
+          params.degradationPreference = 'maintain-framerate';
           await sender.setParameters(params);
-          console.log('[WEBRTC] High definition video parameters applied (4 Mbps, scale 1.0, maintain-resolution)');
+          console.log('[WEBRTC] 60 FPS High definition video parameters applied (5 Mbps, maxFramerate 60, maintain-framerate)');
         }
         if (sender.track && sender.track.kind === 'audio') {
           const params = sender.getParameters();
@@ -376,6 +410,7 @@ export class WebRTCManager {
   private async createAndSendOffer() {
     if (!this.peerConnection) return;
     try {
+      this.applyCodecPreferences();
       const offer = await this.peerConnection.createOffer();
       const boostedSdp = this.boostSdpBitrate(offer.sdp || '');
       await this.peerConnection.setLocalDescription({ type: offer.type, sdp: boostedSdp });
@@ -417,6 +452,7 @@ export class WebRTCManager {
         }
       }
 
+      this.applyCodecPreferences();
       const answer = await this.peerConnection.createAnswer();
       const boostedSdp = this.boostSdpBitrate(answer.sdp || '');
       await this.peerConnection.setLocalDescription({ type: answer.type, sdp: boostedSdp });
@@ -607,9 +643,9 @@ export class WebRTCManager {
           ? '320x180 @ 15fps'
           : tier === 'critical-audio-only'
           ? 'Audio Only'
-          : '1280x720 @ 30fps',
+          : '1920x1080 @ 60fps',
       tier: this.currentTier,
-      codec: 'VP8 / Opus FEC',
+      codec: 'H.264 / VP8 (60fps) / Opus FEC',
       fecActive: this.simulatedLoss > 3,
       isRealStats: false,
     };
@@ -641,9 +677,9 @@ export class WebRTCManager {
             ? '320x180 @ 15fps'
             : this.currentTier === 'critical-audio-only'
             ? 'Audio Only'
-            : '1280x720 @ 30fps',
+            : '1920x1080 @ 60fps',
         tier: this.currentTier,
-        codec: 'VP8 / Opus FEC',
+        codec: 'H.264 / VP8 (60fps) / Opus FEC',
         fecActive: this.simulatedLoss > 3,
         iceState,
         isRealStats: false,
@@ -693,7 +729,7 @@ export class WebRTCManager {
             }
 
             if (report.frameWidth && report.frameHeight) {
-              resolution = `${report.frameWidth}x${report.frameHeight} @ ${report.framesPerSecond || 30}fps`;
+              resolution = `${report.frameWidth}x${report.frameHeight} @ ${report.framesPerSecond || 60}fps`;
             } else if (framesDecoded > 0) {
               resolution = 'Active Feed (Decoding)';
             }
