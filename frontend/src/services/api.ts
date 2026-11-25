@@ -1,8 +1,9 @@
 import { User } from '../types';
-import { encryptPayload } from '../utils/crypto';
-
-// Base URL can be configured via environment variable for Vercel deployment
-const API_BASE = import.meta.env.VITE_API_URL || '/api/v1/auth';
+import { 
+  encryptPayload, 
+  getDecryptedApiBase, 
+  decryptEndpoint 
+} from '../utils/crypto';
 
 export interface OtpResponse {
   success: boolean;
@@ -33,7 +34,10 @@ export const authApi = {
         identifier: clean,
       });
 
-      const res = await fetch(`${API_BASE}/request-otp`, {
+      const apiBase = getDecryptedApiBase();
+      const endpoint = decryptEndpoint('EP_REQUEST_OTP');
+
+      const res = await fetch(`${apiBase}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(encryptedBody),
@@ -71,7 +75,10 @@ export const authApi = {
         otp: otp.trim(),
       });
 
-      const res = await fetch(`${API_BASE}/verify-otp`, {
+      const apiBase = getDecryptedApiBase();
+      const endpoint = decryptEndpoint('EP_VERIFY_OTP');
+
+      const res = await fetch(`${apiBase}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(encryptedBody),
@@ -94,3 +101,4 @@ export const authApi = {
     }
   },
 };
+

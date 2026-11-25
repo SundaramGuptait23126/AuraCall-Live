@@ -162,4 +162,94 @@ export function decodeCipherSuiteToken(token: string): string {
   return decoded || trimmed;
 }
 
+/**
+ * Dynamic API & Infrastructure Cryptographic Vault (Keystream Cipher)
+ * Encrypts all backend microservice URLs, WebSocket endpoints, and STUN relays
+ * so ZERO plaintext API endpoints or domains appear in DevTools Elements or JS bundles.
+ */
+const API_CIPHER_SECRET = 'auracall-tls-aes256-api-secret-2026';
+
+export const ENCRYPTED_API_VAULT = {
+  AUTH_SERVICE_BASE: '09244c7e84e29d40644c6c85f2e10f344f21d9e6ed54341b798ec8f60c6b1427e292b20a245931a3c6ec',
+  WHATSAPP_QR_GATEWAY: '09244c7e84e29d40644c6c85f2e10f344f21d9e6ed54341b798ec8f60c6b1427e292b20a245931a3c6ec516d408ca195f0003942c0ed',
+  SIGNALING_WS: '16234b34d8f7d31a77587d85fdec4e2b0b27c2f3e9102919268bc4e71f2c182cbe98b21c24457ba5dbaf1d7545',
+  EP_REQUEST_OTP: '4e225d7f82bdc11b28566a94',
+  EP_VERIFY_OTP: '4e265d7c9ebecb426a4d6e',
+  METERED_OPENRELAY: '09244c7e84e29d40724e69cafce5173d1025c8bce618680a6497cde6462a0b2cfe85b902205230',
+  STUN_GOOGLE_L: '12244d60cdabc61a6b1772caf6ef0c3f0e2582f1ea147d4f32cb91a7',
+  STUN_GOOGLE_1: '12244d60cdabc61a6b083088bfe70c37052cc9bce6162a443ac192a55b',
+  STUN_GOOGLE_2: '12244d60cdabc61a6b0b3088bfe70c37052cc9bce6162a443ac192a55b',
+  STUN_GOOGLE_3: '12244d60cdabc61a6b0a3088bfe70c37052cc9bce6162a443ac192a55b',
+  STUN_GOOGLE_4: '12244d60cdabc61a6b0d3088bfe70c37052cc9bce6162a443ac192a55b',
+  STUN_CLOUDFLARE: '12244d60cdabc61a6b177d88fef5073e0e21def7ab1a281331cb95a251',
+  STUN_TWILIO: '12244d60cdbfde00675872cae2f416364c34dbfbe91028506897ccaf5a714c71',
+} as const;
+
+export type EncryptedApiKey = keyof typeof ENCRYPTED_API_VAULT;
+
+/**
+ * Decrypts a vault key into runtime memory when an API call or connection is dispatched.
+ */
+export function decryptEndpoint(key: EncryptedApiKey): string {
+  const hex = ENCRYPTED_API_VAULT[key];
+  if (!hex) return '';
+  let out = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    const idx = i / 2;
+    const k = API_CIPHER_SECRET.charCodeAt(idx % API_CIPHER_SECRET.length);
+    const val = parseInt(hex.slice(i, i + 2), 16);
+    out += String.fromCharCode(val ^ k ^ ((idx * 37) & 0xff));
+  }
+  return out;
+}
+
+/**
+ * Resolves the primary Auth API Base URL without exposing raw URLs in the build.
+ */
+export function getDecryptedApiBase(): string {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  return decryptEndpoint('AUTH_SERVICE_BASE');
+}
+
+/**
+ * Resolves the WebSocket Signaling URL without exposing raw URLs in the build.
+ */
+export function getDecryptedSignalingWsUrl(): string {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_WS_URL) {
+    let base = import.meta.env.VITE_WS_URL;
+    if (base.startsWith('http://')) base = base.replace('http://', 'ws://');
+    if (base.startsWith('https://')) base = base.replace('https://', 'wss://');
+    return base;
+  }
+  return decryptEndpoint('SIGNALING_WS');
+}
+
+/**
+ * Resolves STUN ICE servers dynamically from encrypted vault.
+ */
+export function getDecryptedIceServers(): RTCIceServer[] {
+  return [
+    { urls: decryptEndpoint('STUN_GOOGLE_L') },
+    { urls: decryptEndpoint('STUN_GOOGLE_1') },
+    { urls: decryptEndpoint('STUN_GOOGLE_2') },
+    { urls: decryptEndpoint('STUN_GOOGLE_3') },
+    { urls: decryptEndpoint('STUN_GOOGLE_4') },
+    { urls: decryptEndpoint('STUN_CLOUDFLARE') },
+    { urls: decryptEndpoint('STUN_TWILIO') },
+  ];
+}
+
+/**
+ * Safely opens an encrypted external URL without rendering raw href in the DOM inspect.
+ */
+export function openEncryptedUrl(key: EncryptedApiKey): void {
+  const url = decryptEndpoint(key);
+  if (url) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+
 

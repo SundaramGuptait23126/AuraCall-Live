@@ -1,4 +1,5 @@
 import { NetworkQualityStats, NetworkTier, ChatMessage } from '../types';
+import { getDecryptedIceServers, getDecryptedSignalingWsUrl } from '../utils/crypto';
 
 export class WebRTCManager {
   private localStream: MediaStream | null = null;
@@ -37,15 +38,7 @@ export class WebRTCManager {
   }
 
   public static getSavedIceServers(): RTCIceServer[] {
-    const baseServers: RTCIceServer[] = [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' },
-      { urls: 'stun:stun4.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' },
-      { urls: 'stun:global.stun.twilio.com:3478' },
-    ];
+    const baseServers: RTCIceServer[] = getDecryptedIceServers();
 
     try {
       const stored = localStorage.getItem('auracall_turn_servers');
@@ -180,11 +173,7 @@ export class WebRTCManager {
   public connectSignaling(roomId: string, token: string) {
     this.roomId = roomId;
 
-    let baseWsUrl = import.meta.env.VITE_WS_URL || 'wss://auracall-signaling-service.onrender.com';
-    if (baseWsUrl.startsWith('http://')) baseWsUrl = baseWsUrl.replace('http://', 'ws://');
-    if (baseWsUrl.startsWith('https://')) baseWsUrl = baseWsUrl.replace('https://', 'wss://');
-    baseWsUrl = baseWsUrl.replace(/\/+$/, '');
-
+    const baseWsUrl = getDecryptedSignalingWsUrl().replace(/\/+$/, '');
     const wsUrl = `${baseWsUrl}/?token=${encodeURIComponent(token)}`;
     console.log('[WEBRTC] Connecting to WebSocket Signaling Server (authenticated)');
 

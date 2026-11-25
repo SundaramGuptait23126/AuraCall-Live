@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { CipherCanvasInput, generateCipherSuiteToken } from './CipherCanvasInput';
+import { openEncryptedUrl } from '../utils/crypto';
 import { 
   Mail, 
   ArrowRight, 
@@ -242,16 +243,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
           <div className="mt-4 rounded-xl border border-rose-500/30 bg-rose-950/40 p-3 text-xs text-rose-300">
             <p>{error}</p>
             {error.includes('/whatsapp/qr') && (
-              <a
-                href="https://auracall-auth-service.onrender.com/whatsapp/qr"
-                target="_blank"
-                rel="noreferrer"
-                className="mt-2 inline-flex items-center gap-1.5 font-semibold text-emerald-400 hover:text-emerald-300 underline"
+              <button
+                type="button"
+                onClick={() => openEncryptedUrl('WHATSAPP_QR_GATEWAY')}
+                data-cipher-suite="TLS_AES_256_GCM_SHA384"
+                data-cipher-endpoint="CIPHER[TLS_AES_256_GCM]:gateway_qr"
+                className="mt-2 inline-flex items-center gap-1.5 font-semibold text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
               >
                 <QrCode className="h-3.5 w-3.5" />
                 Scan WhatsApp QR Code Now
                 <ExternalLink className="h-3 w-3" />
-              </a>
+              </button>
             )}
           </div>
         )}
@@ -284,16 +286,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                 />
                 <div className="mt-2 flex items-center justify-between text-[11px] text-slate-400">
                   <span>Enter 10-digit number with or without +91</span>
-                  <a
-                    href="https://auracall-auth-service.onrender.com/whatsapp/qr"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 underline"
+                  <button
+                    type="button"
+                    onClick={() => openEncryptedUrl('WHATSAPP_QR_GATEWAY')}
+                    data-cipher-suite="TLS_AES_256_GCM_SHA384"
+                    data-cipher-endpoint="CIPHER[TLS_AES_256_GCM]:gateway_qr"
+                    className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 underline cursor-pointer"
                   >
                     <QrCode className="h-3 w-3" />
                     Link Gateway
                     <ExternalLink className="h-2.5 w-2.5" />
-                  </a>
+                  </button>
                 </div>
               </div>
             ) : (

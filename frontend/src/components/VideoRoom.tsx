@@ -5,7 +5,7 @@ import { NetworkQualityStats, NetworkTier, ChatMessage } from '../types';
 import { Controls } from './Controls';
 import { NetworkStatsHUD } from './NetworkStatsHUD';
 import { ChatDrawer } from './ChatDrawer';
-import { formatCipherIdentity, generateCipherSuiteToken } from '../utils/crypto';
+import { formatCipherIdentity, generateCipherSuiteToken, openEncryptedUrl } from '../utils/crypto';
 import {
   Copy,
   Check,
@@ -60,7 +60,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
   const [isVideoFitContain, setIsVideoFitContain] = useState(false);
 
   // TURN Modal Form State
-  const [turnUrl, setTurnUrl] = useState('turn:standard.relay.metered.ca:80');
+  const [turnUrl, setTurnUrl] = useState('');
   const [turnUser, setTurnUser] = useState('');
   const [turnPass, setTurnPass] = useState('');
 
@@ -648,7 +648,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
                     type="text"
                     value={turnUrl}
                     onChange={(e) => setTurnUrl(e.target.value)}
-                    placeholder="turn:standard.relay.metered.ca:80"
+                    placeholder="turn:relay.example.com:3478"
                     className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none"
                   />
                 </div>
@@ -659,7 +659,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
                     type="text"
                     value={turnUser}
                     onChange={(e) => setTurnUser(e.target.value)}
-                    placeholder="Your Metered / Xirsys username"
+                    placeholder="Your TURN relay username"
                     className="w-full rounded-xl border border-slate-800 bg-slate-950 px-3 py-2 text-xs text-white focus:border-cyan-500 focus:outline-none"
                   />
                 </div>
@@ -679,14 +679,15 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               <div className="p-3 rounded-2xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-400">
                 <span className="text-slate-300 font-semibold block mb-0.5">Free TURN Option:</span>
                 Get free 20 GB/month TURN credentials in 60 seconds at{' '}
-                <a
-                  href="https://www.metered.ca/tools/openrelay/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-cyan-400 underline font-semibold"
+                <button
+                  type="button"
+                  onClick={() => openEncryptedUrl('METERED_OPENRELAY')}
+                  data-cipher-suite="TLS_AES_256_GCM_SHA384"
+                  data-cipher-endpoint="CIPHER[TLS_AES_256_GCM]:turn_relay"
+                  className="text-cyan-400 underline font-semibold cursor-pointer"
                 >
-                  metered.ca/tools/openrelay
-                </a>
+                  Encrypted Relay Portal
+                </button>
               </div>
             </div>
 
