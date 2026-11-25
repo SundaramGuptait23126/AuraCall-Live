@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User } from '../types';
 import { authApi, OtpResponse, VerifyResponse } from '../services/api';
+import { secureStorage } from '../utils/crypto';
 
 interface AuthContextType {
   user: User | null;
@@ -27,9 +28,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (savedToken && savedUser) {
       try {
         setToken(savedToken);
-        setUser(JSON.parse(savedUser));
-      } catch (err) {
-        console.error('Failed to parse cached user data', err);
+        const parsed = secureStorage.decrypt<User>(savedUser);
+        if (parsed) {
+          setUser(parsed);
+        } else {
+          setUser(JSON.parse(savedUser));
+        }
+      } catch {
         localStorage.removeItem('auracall_jwt');
         localStorage.removeItem('auracall_user');
       }
@@ -47,7 +52,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(res.token);
       setUser(res.user);
       localStorage.setItem('auracall_jwt', res.token);
-      localStorage.setItem('auracall_user', JSON.stringify(res.user));
+      localStorage.setItem('auracall_user', secureStorage.encrypt(res.user));
     }
     return res;
   };

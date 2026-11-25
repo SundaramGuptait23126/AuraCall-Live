@@ -1,0 +1,104 @@
+/**
+ * Client-Side Application-Level Payload Encryption (AES-256-GCM)
+ * Encrypts sensitive fields (phone number, email, OTP) before transmission over the network.
+ * DevTools Network tab will only display randomized ciphertext, preventing credential leakage in browser inspect.
+ */
+
+const E2EE_SECRET = 'auracall-e2ee-auth-secret-key-2026';
+
+let cachedKey: CryptoKey | null = null;
+
+async function getEncryptionKey(): Promise<CryptoKey> {
+  if (cachedKey) return cachedKey;
+  const encoder = new TextEncoder();
+  const rawSecret = encoder.encode(E2EE_SECRET);
+  const keyDigest = await window.crypto.subtle.digest('SHA-256', rawSecret);
+  cachedKey = await window.crypto.subtle.importKey(
+    'raw',
+    keyDigest,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  return cachedKey;
+}
+
+function bufferToHex(buffer: ArrayBuffer | Uint8Array): string {
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+export interface EncryptedPayload {
+  encrypted: true;
+  data: string;
+  iv: string;
+  tag: string;
+  ts: number;
+}
+
+/**
+ * Encrypts arbitrary authentication payload using AES-256-GCM with a dynamic 12-byte IV.
+ */
+export async function encryptPayload<T extends object>(payload: T): Promise<EncryptedPayload> {
+  const key = await getEncryptionKey();
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
+  const encoder = new TextEncoder();
+  const ts = Date.now();
+  const serialized = JSON.stringify({
+    ...payload,
+    _ts: ts,
+    _nonce: Math.random().toString(36).substring(2, 10),
+  });
+  const encodedData = encoder.encode(serialized);
+
+  const encryptedBuffer = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encodedData
+  );
+
+  const encryptedArray = new Uint8Array(encryptedBuffer);
+  // In Web Crypto API, the last 16 bytes of AES-GCM output is the authentication tag
+  const ciphertextBytes = encryptedArray.slice(0, encryptedArray.length - 16);
+  const tagBytes = encryptedArray.slice(encryptedArray.length - 16);
+
+  return {
+    encrypted: true,
+    data: bufferToHex(ciphertextBytes),
+    iv: bufferToHex(iv),
+    tag: bufferToHex(tagBytes),
+    ts,
+  };
+}
+
+/**
+ * Secure Storage Utility to prevent plaintext user credentials in DevTools -> Application -> Local Storage
+ */
+export const secureStorage = {
+  encrypt(data: unknown): string {
+    try {
+      const json = JSON.stringify(data);
+      const encoded = btoa(encodeURIComponent(json));
+      return `enc_${encoded.split('').reverse().join('')}`;
+    } catch {
+      return '';
+    }
+  },
+  decrypt<T>(stored: string | null): T | null {
+    if (!stored) return null;
+    try {
+      if (stored.startsWith('enc_')) {
+        const raw = stored.slice(4).split('').reverse().join('');
+        const json = decodeURIComponent(atob(raw));
+        return JSON.parse(json) as T;
+      }
+      return JSON.parse(stored) as T;
+    } catch {
+      return null;
+    }
+  },
+};

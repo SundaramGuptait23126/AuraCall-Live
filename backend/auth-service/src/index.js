@@ -3,6 +3,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const mysql = require('mysql2/promise');
 const { sendWhatsAppOtp, getConnectionStatus, getQrCodeDataUrl } = require('./whatsapp');
+const { decryptPayload, maskIdentifier } = require('./crypto');
 
 const app = express();
 const PORT = process.env.PORT || 4001;
@@ -219,7 +220,16 @@ app.get('/whatsapp/qr', (req, res) => {
 // 1. Universal Request OTP (Dispatches to Email via SLM OR to Phone via WhatsApp)
 app.post('/request-otp', async (req, res) => {
   try {
-    const rawIdentifier = req.body.email || req.body.phone || req.body.identifier;
+    let payload = req.body;
+    if (req.body && req.body.encrypted) {
+      try {
+        payload = decryptPayload(req.body);
+      } catch (decErr) {
+        return res.status(400).json({ success: false, message: 'Invalid or corrupted encrypted payload.' });
+      }
+    }
+
+    const rawIdentifier = payload.email || payload.phone || payload.identifier;
     if (!rawIdentifier) {
       return res.status(400).json({ success: false, message: 'Valid email address or WhatsApp mobile number is required.' });
     }
@@ -262,7 +272,7 @@ app.post('/request-otp', async (req, res) => {
             if (slmData.otpCode) {
               finalOtp = slmData.otpCode.toString().trim();
               slmUsed = true;
-              console.log(`[AUTH-SERVICE] OTP generated & delivered by SLM: ${finalOtp} for ${normalizedIdentifier}`);
+              console.log(`[AUTH-SERVICE] OTP generated & delivered by SLM for ${maskIdentifier(normalizedIdentifier)}`);
             }
           }
         }
@@ -293,7 +303,7 @@ app.post('/request-otp', async (req, res) => {
 
       try {
         await sendWhatsAppOtp(normalizedIdentifier, finalOtp);
-        dispatchMessage = `Verification code sent to WhatsApp: ${normalizedIdentifier}`;
+        dispatchMessage = `Verification code sent to WhatsApp: ${maskIdentifier(normalizedIdentifier)}`;
       } catch (waErr) {
         console.error('[AUTH-SERVICE] WhatsApp dispatch failed:', waErr);
         return res.status(500).json({
@@ -315,7 +325,7 @@ app.post('/request-otp', async (req, res) => {
            ON DUPLICATE KEY UPDATE otp = VALUES(otp), expires_at = VALUES(expires_at)`,
           [normalizedIdentifier, finalOtp, expiry]
         );
-        console.log(`[AUTH-SERVICE] Saved OTP ${finalOtp} for ${normalizedIdentifier} to Aiven MySQL.`);
+        console.log(`[AUTH-SERVICE] Saved OTP securely for ${maskIdentifier(normalizedIdentifier)} to Aiven MySQL.`);
       } catch (dbErr) {
         console.error('[AUTH-SERVICE] MySQL save error:', dbErr.message);
       }
@@ -339,8 +349,17 @@ app.post('/request-otp', async (req, res) => {
 // 2. Universal Verify OTP (Aiven MySQL Database & JWT)
 app.post('/verify-otp', async (req, res) => {
   try {
-    const rawIdentifier = req.body.email || req.body.phone || req.body.identifier;
-    const { otp } = req.body;
+    let payload = req.body;
+    if (req.body && req.body.encrypted) {
+      try {
+        payload = decryptPayload(req.body);
+      } catch (decErr) {
+        return res.status(400).json({ success: false, message: 'Invalid or corrupted encrypted payload.' });
+      }
+    }
+
+    const rawIdentifier = payload.email || payload.phone || payload.identifier;
+    const { otp } = payload;
 
     if (!rawIdentifier || !otp) {
       return res.status(400).json({ success: false, message: 'Email/Phone and OTP are required.' });
@@ -363,7 +382,6 @@ app.post('/verify-otp', async (req, res) => {
         );
         if (rows && rows.length > 0) {
           record = { otp: rows[0].otp.toString().trim(), expiry: Number(rows[0].expires_at) };
-          console.log(`[AUTH-SERVICE] Retrieved OTP from Aiven MySQL for ${normalizedIdentifier}: ${record.otp}`);
         }
       } catch (dbErr) {
         console.error('[AUTH-SERVICE] Error reading OTP from Aiven MySQL:', dbErr.message);
@@ -420,7 +438,7 @@ app.post('/verify-otp', async (req, res) => {
       { expiresIn: '7d' }
     );
 
-    console.log(`[AUTH-SERVICE] User ${normalizedIdentifier} successfully authenticated via Aiven DB. Issued JWT.`);
+    console.log(`[AUTH-SERVICE] User ${maskIdentifier(normalizedIdentifier)} successfully authenticated. Issued JWT.`);
 
     return res.json({
       success: true,

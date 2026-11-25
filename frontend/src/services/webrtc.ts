@@ -186,7 +186,7 @@ export class WebRTCManager {
     baseWsUrl = baseWsUrl.replace(/\/+$/, '');
 
     const wsUrl = `${baseWsUrl}/?token=${encodeURIComponent(token)}`;
-    console.log(`[WEBRTC] Connecting to WebSocket Signaling Server: ${wsUrl}`);
+    console.log('[WEBRTC] Connecting to WebSocket Signaling Server (authenticated)');
 
     try {
       this.ws = new WebSocket(wsUrl);
@@ -247,7 +247,7 @@ export class WebRTCManager {
             }
 
             case 'peer-joined': {
-              console.log(`[SIGNALING] Remote peer joined: ${payload.peerId} (${payload.email}). Creating WebRTC Offer.`);
+              console.log(`[SIGNALING] Remote peer joined: ${payload.peerId}. Creating WebRTC Offer.`);
               if (this.offerFallbackTimer) clearTimeout(this.offerFallbackTimer);
               this.isCaller = true;
               this.onPeerStatusCallback?.({ connected: true, email: payload.email, peersCount: 2 });

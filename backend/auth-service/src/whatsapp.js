@@ -126,7 +126,8 @@ async function sendWhatsAppOtp(phone, otpCode) {
     text: messageText,
   });
 
-  console.log(`[WHATSAPP] 🚀 OTP dispatched to +${cleanPhone} (Message ID: ${result?.key?.id})`);
+  const maskedPhone = cleanPhone.length > 6 ? cleanPhone.slice(0, 4) + '******' + cleanPhone.slice(-2) : '******';
+  console.log(`[WHATSAPP] 🚀 OTP dispatched to +${maskedPhone} (Message ID: ${result?.key?.id})`);
   return { success: true, messageId: result?.key?.id };
 }
 
