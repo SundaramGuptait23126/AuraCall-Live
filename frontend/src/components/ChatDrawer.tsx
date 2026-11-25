@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChatMessage } from '../types';
 import { Send, MessageSquare } from 'lucide-react';
+import { formatCipherIdentity } from '../utils/crypto';
 
 interface ChatDrawerProps {
   isOpen: boolean;
@@ -52,8 +53,8 @@ export const ChatDrawer: React.FC<ChatDrawerProps> = ({
               key={msg.id}
               className={`flex flex-col ${msg.isSelf ? 'items-end' : 'items-start'}`}
             >
-              <span className="text-[10px] text-slate-400 mb-0.5">
-                {msg.isSelf ? 'You' : msg.senderEmail.split('@')[0]}
+              <span className="text-[10px] font-mono text-slate-400 mb-0.5">
+                {msg.isSelf ? 'You' : formatCipherIdentity(msg.senderEmail)}
               </span>
               <div
                 className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs ${

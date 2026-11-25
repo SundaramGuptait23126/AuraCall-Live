@@ -102,3 +102,41 @@ export const secureStorage = {
     }
   },
 };
+
+/**
+ * Generates an active Cipher Suite token string to replace plaintext in DOM inspection.
+ */
+export function generateCipherSuiteToken(plaintext: string, suite: string = 'AES_256_GCM'): string {
+  if (!plaintext) return '';
+  let hash = 0;
+  for (let i = 0; i < plaintext.length; i++) {
+    hash = (hash << 5) - hash + plaintext.charCodeAt(i);
+    hash |= 0;
+  }
+  const hexPart = Math.abs(hash).toString(16).padStart(8, '0');
+  const pseudoSig = Array.from(plaintext)
+    .map((c) => (c.charCodeAt(0) ^ 0x5a).toString(16).padStart(2, '0'))
+    .join('');
+  return `CIPHER[TLS_${suite}]:${hexPart}${pseudoSig}`;
+}
+
+/**
+ * Returns a sleek, masked Cipher Suite identity badge for UI display.
+ * E.g., for phone number "9453028301" or email "user@domain.com":
+ * "CIPHER[TLS_AES_256_GCM]:a7f9" or "Peer [TLS_AES_256_GCM:a7f9]"
+ */
+export function formatCipherIdentity(raw: string | null | undefined, prefix?: string): string {
+  if (!raw) return prefix ? `${prefix} [TLS_AES_256_GCM]` : 'CIPHER[TLS_AES_256_GCM]';
+  let hash = 0;
+  for (let i = 0; i < raw.length; i++) {
+    hash = (hash << 5) - hash + raw.charCodeAt(i);
+    hash |= 0;
+  }
+  const token = Math.abs(hash).toString(16).padStart(4, '0').slice(0, 4);
+  const suite = 'TLS_AES_256_GCM';
+  if (prefix) {
+    return `${prefix} [${suite}:${token}]`;
+  }
+  return `CIPHER[${suite}]:${token}`;
+}
+

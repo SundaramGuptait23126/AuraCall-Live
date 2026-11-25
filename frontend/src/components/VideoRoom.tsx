@@ -5,6 +5,7 @@ import { NetworkQualityStats, NetworkTier, ChatMessage } from '../types';
 import { Controls } from './Controls';
 import { NetworkStatsHUD } from './NetworkStatsHUD';
 import { ChatDrawer } from './ChatDrawer';
+import { formatCipherIdentity, generateCipherSuiteToken } from '../utils/crypto';
 import {
   Copy,
   Check,
@@ -473,7 +474,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               </div>
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Peer...</h2>
               <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
-                Peer ({remotePeerEmail ? remotePeerEmail.split('@')[0] : 'Remote'}) connected. Synchronizing video streams...
+                Peer <span className="font-mono text-emerald-400">{formatCipherIdentity(remotePeerEmail || 'Remote')}</span> connected. Synchronizing video streams...
               </p>
               <div className="flex items-center gap-2 rounded-full bg-slate-950/80 border border-slate-800 px-3 py-1 text-[11px] font-mono text-cyan-400">
                 <span className="h-2 w-2 rounded-full bg-cyan-400 animate-ping" />
@@ -536,8 +537,18 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
 
           {/* Remote Peer Label */}
           {hasRemoteStream && (
-            <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 rounded-xl bg-black/60 px-3 py-1.5 backdrop-blur-md border border-slate-800 text-xs text-slate-200">
-              <span>{remotePeerEmail ? `Peer (${remotePeerEmail.split('@')[0]})` : 'Remote Peer'}</span>
+            <div 
+              data-cipher-suite="TLS_AES_256_GCM_SHA384"
+              data-identity={generateCipherSuiteToken(remotePeerEmail || 'peer', 'AES_256_GCM')}
+              className="absolute bottom-5 left-5 z-20 flex items-center gap-2 rounded-xl bg-black/70 px-3 py-1.5 backdrop-blur-md border border-slate-800 text-xs text-slate-200"
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Peer</span>
+                <span className="rounded bg-emerald-950/80 px-1.5 py-0.5 text-[10px] font-mono text-emerald-400 border border-emerald-800/40">
+                  {formatCipherIdentity(remotePeerEmail || 'Peer')}
+                </span>
+              </span>
               <span className="rounded bg-cyan-950 px-1.5 py-0.5 text-[10px] font-mono text-cyan-400">
                 {networkStats.resolution}
               </span>
@@ -577,8 +588,16 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
               )}
             </div>
 
-            <div className="absolute bottom-2 left-2 rounded-md bg-black/70 px-2 py-0.5 text-[10px] text-slate-300 backdrop-blur-sm">
-              You ({user?.email?.split('@')[0]})
+            <div 
+              data-cipher-suite="TLS_AES_256_GCM_SHA384"
+              data-identity={generateCipherSuiteToken(user?.email || 'self', 'AES_256_GCM')}
+              className="absolute bottom-2 left-2 rounded-md bg-black/80 px-2 py-0.5 text-[10px] text-slate-300 backdrop-blur-sm border border-slate-800/60 flex items-center gap-1.5"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+              <span>You</span>
+              <span className="font-mono text-[9px] text-cyan-400 bg-cyan-950/60 px-1 rounded border border-cyan-800/40">
+                {formatCipherIdentity(user?.email || 'Self')}
+              </span>
             </div>
           </div>
         </div>

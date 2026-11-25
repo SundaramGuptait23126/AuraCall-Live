@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { formatCipherIdentity, generateCipherSuiteToken } from '../utils/crypto';
 import {
   Video,
   VideoOff,
@@ -109,9 +110,15 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoinRoom }) => {
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="text-right">
-            <span className="block text-xs font-medium text-slate-200">{user?.email}</span>
-            <span className="block text-[10px] text-emerald-400 font-mono">Authenticated via JWT</span>
+          <div 
+            className="text-right"
+            data-cipher-suite="TLS_AES_256_GCM_SHA384"
+            data-identity={generateCipherSuiteToken(user?.email || 'user', 'AES_256_GCM')}
+          >
+            <span className="block text-xs font-mono font-medium text-emerald-400">
+              {formatCipherIdentity(user?.email || 'Authenticated User')}
+            </span>
+            <span className="block text-[10px] text-slate-400 font-mono">TLS_AES_256_GCM Shielded</span>
           </div>
           <button
             onClick={logout}

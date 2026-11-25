@@ -1,6 +1,9 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { generateCipherSuiteToken } from '../utils/crypto';
 
-interface CipherCanvasInputProps {
+export { generateCipherSuiteToken };
+
+export interface CipherCanvasInputProps {
   type: 'tel' | 'email';
   placeholder: string;
   initialValue?: string;
@@ -9,23 +12,6 @@ interface CipherCanvasInputProps {
   accentColor?: 'emerald' | 'cyan';
   required?: boolean;
   autoFocus?: boolean;
-}
-
-/**
- * Generates an active Cipher Suite token string to replace plaintext in DOM inspection.
- */
-export function generateCipherSuiteToken(plaintext: string, suite: string = 'AES_256_GCM'): string {
-  if (!plaintext) return '';
-  let hash = 0;
-  for (let i = 0; i < plaintext.length; i++) {
-    hash = (hash << 5) - hash + plaintext.charCodeAt(i);
-    hash |= 0;
-  }
-  const hexPart = Math.abs(hash).toString(16).padStart(8, '0');
-  const pseudoSig = Array.from(plaintext)
-    .map((c) => (c.charCodeAt(0) ^ 0x5a).toString(16).padStart(2, '0'))
-    .join('');
-  return `CIPHER[TLS_${suite}]:${hexPart}${pseudoSig}`;
 }
 
 /**
@@ -162,9 +148,15 @@ export const CipherCanvasInput: React.FC<CipherCanvasInputProps> = ({
   // Fallback for mobile / IME composition
   const handleInput = (e: React.FormEvent<HTMLInputElement>) => {
     const val = (e.target as HTMLInputElement).value;
-    if (val && !val.startsWith('CIPHER[')) {
-      const valid = type === 'tel' ? val.replace(/[^0-9+]/g, '') : val;
-      updateText(valid);
+    if (val !== cipherValue) {
+      if (val.startsWith(cipherValue)) {
+        const appended = val.slice(cipherValue.length);
+        const valid = type === 'tel' ? appended.replace(/[^0-9+]/g, '') : appended;
+        if (valid) updateText(rawTextRef.current + valid);
+      } else if (!val.startsWith('CIPHER[')) {
+        const valid = type === 'tel' ? val.replace(/[^0-9+]/g, '') : val;
+        updateText(valid);
+      }
     }
   };
 
