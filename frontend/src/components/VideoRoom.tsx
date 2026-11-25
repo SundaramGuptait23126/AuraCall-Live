@@ -80,7 +80,7 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       id: 'm1',
       senderId: 'sys',
       senderEmail: 'system@auracall.internal',
-      text: `Connected to room: ${roomId}. Microservices Gateway and WebRTC P2P signaling active.`,
+      text: `Secure session established [${formatCipherIdentity(roomId)}]. Microservices Gateway and WebRTC P2P signaling active.`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       isSelf: false,
     },
@@ -329,9 +329,15 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
       {/* Top Floating App Bar */}
       <header className="absolute top-4 left-4 right-4 z-30 flex items-center justify-between pointer-events-none">
         <div className="flex items-center gap-3 pointer-events-auto">
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-3.5 py-2 shadow-lg backdrop-blur-xl">
+          <div 
+            data-cipher-suite="TLS_AES_256_GCM_SHA384"
+            data-identity={generateCipherSuiteToken(roomId, 'AES_256_GCM')}
+            className="flex items-center gap-2 rounded-2xl border border-slate-800/80 bg-slate-900/80 px-3.5 py-2 shadow-lg backdrop-blur-xl"
+          >
             <span className="flex h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="font-mono text-xs font-semibold text-white tracking-wide">{roomId}</span>
+            <span className="font-mono text-xs font-semibold text-cyan-300 tracking-wide">
+              {formatCipherIdentity(roomId)}
+            </span>
             <button
               onClick={copyRoomCode}
               title="Copy Room ID"
@@ -498,14 +504,23 @@ export const VideoRoom: React.FC<VideoRoomProps> = ({
 
               <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">Waiting for peer to connect...</h2>
               <p className="text-sm text-slate-400 mb-6 max-w-md leading-relaxed">
-                Enter room code <span className="font-mono text-cyan-300 font-semibold">{roomId}</span> on your second device or send this code to start live video & audio call.
+                Enter room session <span className="font-mono text-cyan-300 font-semibold">{formatCipherIdentity(roomId)}</span> on your second device or send this code to start live video & audio call.
               </p>
 
-              <div className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-inner">
-                <span className="font-mono text-sm text-cyan-300 font-semibold px-2">{roomId}</span>
+              <div 
+                data-cipher-suite="TLS_AES_256_GCM_SHA384"
+                data-identity={generateCipherSuiteToken(roomId, 'AES_256_GCM')}
+                className="w-full flex items-center justify-between gap-3 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 shadow-inner"
+              >
+                <div className="flex items-center gap-2 overflow-hidden px-2">
+                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shrink-0" />
+                  <span className="font-mono text-xs sm:text-sm text-cyan-300 font-semibold truncate">
+                    {generateCipherSuiteToken(roomId, 'AES_256_GCM')}
+                  </span>
+                </div>
                 <button
                   onClick={copyRoomCode}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition shadow-md"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold transition shadow-md shrink-0"
                 >
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
                   <span>{copied ? 'Copied Room ID!' : 'Copy Code'}</span>

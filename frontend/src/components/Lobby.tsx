@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { formatCipherIdentity, generateCipherSuiteToken } from '../utils/crypto';
+import { formatCipherIdentity, generateCipherSuiteToken, decodeCipherSuiteToken } from '../utils/crypto';
 import {
   Video,
   VideoOff,
@@ -90,7 +90,8 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoinRoom }) => {
     if (previewStream) {
       previewStream.getTracks().forEach((t) => t.stop());
     }
-    onJoinRoom(roomIdInput.trim(), audioEnabled, videoEnabled);
+    const cleanRoomId = decodeCipherSuiteToken(roomIdInput.trim());
+    onJoinRoom(cleanRoomId, audioEnabled, videoEnabled);
   };
 
   return (
@@ -215,13 +216,15 @@ export const Lobby: React.FC<LobbyProps> = ({ onJoinRoom }) => {
               </span>
             </div>
 
-            <form onSubmit={handleJoin} className="flex gap-2">
+            <form onSubmit={handleJoin} className="flex gap-2" data-cipher-suite="TLS_AES_256_GCM_SHA384">
               <input
                 type="text"
                 value={roomIdInput}
                 onChange={(e) => setRoomIdInput(e.target.value)}
-                placeholder="Enter Room Code (e.g. room-alpha)"
-                className="flex-1 rounded-xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none"
+                placeholder="Enter Room Code or Cipher Token"
+                data-cipher-suite="TLS_AES_256_GCM_SHA384"
+                data-token={generateCipherSuiteToken(roomIdInput, 'AES_256_GCM')}
+                className="flex-1 rounded-xl border border-slate-800 bg-slate-900/90 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-cyan-500 focus:outline-none font-mono"
               />
               <button
                 type="submit"

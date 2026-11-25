@@ -140,3 +140,26 @@ export function formatCipherIdentity(raw: string | null | undefined, prefix?: st
   return `CIPHER[${suite}]:${token}`;
 }
 
+/**
+ * Reversibly decodes a Cipher Suite token back to its original session string if needed.
+ * If raw is already plaintext, returns it directly.
+ */
+export function decodeCipherSuiteToken(token: string): string {
+  if (!token || typeof token !== 'string') return '';
+  const trimmed = token.trim();
+  if (!trimmed.startsWith('CIPHER[')) return trimmed;
+  const colonIdx = trimmed.indexOf(']:');
+  if (colonIdx === -1) return trimmed;
+  const rest = trimmed.slice(colonIdx + 2);
+  // hexPart is 8 chars, pseudoSig is the rest
+  const pseudoSig = rest.slice(8);
+  if (!pseudoSig || pseudoSig.length % 2 !== 0) return trimmed;
+  let decoded = '';
+  for (let i = 0; i < pseudoSig.length; i += 2) {
+    const byte = parseInt(pseudoSig.slice(i, i + 2), 16);
+    decoded += String.fromCharCode(byte ^ 0x5a);
+  }
+  return decoded || trimmed;
+}
+
+
